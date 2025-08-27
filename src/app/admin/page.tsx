@@ -1551,28 +1551,42 @@ export default function AdminDashboard() {
             <form onSubmit={async (e) => {
               e.preventDefault()
               try {
-                const { data, error } = await supabase
-                  .from('user_profiles')
-                  .update({ delivery_fee: editingUser.delivery_fee })
-                  .eq('id', editingUser.id)
-                  .select()
+                const response = await fetch('/api/admin/update-user', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    userId: editingUser.id,
+                    deliveryFee: editingUser.delivery_fee
+                  })
+                });
+
+                const result = await response.json();
                 
-                if (error) {
-                  throw error
+                if (!response.ok) {
+                  throw new Error(result.error || 'Failed to update user');
                 }
                 
-                setShowEditUserModal(false)
-                setEditingUser(null)
-                fetchUsers()
+                console.log('✅ User updated successfully');
+                setShowEditUserModal(false);
+                setEditingUser(null);
+                fetchUsers();
               } catch (error: any) {
-                console.error('Error updating user:', error)
-                alert(`Failed to update user: ${error?.message || 'Unknown error'}`)
+                console.error('❌ Error updating user:', error);
+                console.error('❌ Error details:', {
+                  message: error?.message,
+                  code: error?.code,
+                  details: error?.details,
+                  hint: error?.hint
+                });
+                alert(`Failed to update user: ${error?.message || 'Unknown error'}`);
               }
             }}>
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Delivery Fee (USD)
+                    Delivery Fee (BBD)
                   </label>
                   <input
                     type="number"

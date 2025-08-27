@@ -6,6 +6,22 @@ import { useAuth } from '@/contexts/AuthContext'
 import { supabase, MenuItem, WeeklyMenu, CarouselImage } from '@/lib/supabase'
 import { ShoppingCart, X, Plus, Minus, Trash2, ChevronLeft, ChevronRight } from 'lucide-react'
 import Logo from '@/components/Logo'
+import ReactCountryFlag from 'react-country-flag';
+
+// Barbados flag component using react-country-flag
+const FlagBB = () => (
+  <ReactCountryFlag
+    countryCode="BB"
+    svg
+    title="Barbados"
+    style={{ 
+      width: '1em', 
+      height: '1em', 
+      verticalAlign: 'middle',
+      display: 'inline-block'
+    }}
+  />
+);
 
 interface CartItem {
   id: string
@@ -292,7 +308,7 @@ export default function Home() {
               Delicious vegan meals delivered fresh to your door
             </p>
             <p className="text-lg text-green-600 font-medium mb-8">
-              Always Vegan 💯 | Delivery or Take-away 🚚 | Est. 2020 🇧🇧
+              Always Vegan 💯 | Delivery or Take-away 🚚 | Est. 2020 <FlagBB />
             </p>
             <div className="mb-8">
               <Link
