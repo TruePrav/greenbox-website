@@ -1,9 +1,6 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Production optimizations
-  swcMinify: true,
-  
   // Image optimization
   images: {
     // Since you're only using local images, no external domains needed

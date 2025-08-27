@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { supabase } from '@/lib/supabase';
+import { supabaseAdmin, supabase } from '@/lib/supabase';
 import { z } from 'zod';
 
 export const runtime = 'nodejs';
