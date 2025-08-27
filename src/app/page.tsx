@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useAuth } from '@/contexts/AuthContext'
 import { supabase, MenuItem, WeeklyMenu, CarouselImage } from '@/lib/supabase'
 import { ShoppingCart, X, Plus, Minus, Trash2, ChevronLeft, ChevronRight } from 'lucide-react'
+import Logo from '@/components/Logo'
 
 interface CartItem {
   id: string
@@ -30,15 +31,26 @@ export default function Home() {
   const [cart, setCart] = useState<Cart>({})
   const [isCartOpen, setIsCartOpen] = useState(false)
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
+  const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
+    setMounted(true)
     fetchData()
     loadCartFromStorage()
+
+    return () => {
+      setMounted(false)
+      // Clean up cart state on unmount
+      setCart({})
+      setIsCartOpen(false)
+    }
   }, [])
 
   useEffect(() => {
-    fetchMenuItems(selectedDay)
-  }, [selectedDay])
+    if (mounted) {
+      fetchMenuItems(selectedDay)
+    }
+  }, [selectedDay, mounted])
 
   const fetchData = async () => {
     try {
@@ -89,17 +101,38 @@ export default function Home() {
   }
 
   const loadCartFromStorage = () => {
-    if (typeof window !== 'undefined') {
-      const savedCart = localStorage.getItem('greenbox-cart')
-      if (savedCart) {
-        setCart(JSON.parse(savedCart))
+    if (typeof window !== 'undefined' && mounted) {
+      try {
+        const savedCart = localStorage.getItem('greenbox-cart')
+        if (savedCart) {
+          const parsedCart = JSON.parse(savedCart)
+          // Validate the cart structure before setting it
+          if (parsedCart && typeof parsedCart === 'object') {
+            setCart(parsedCart)
+          }
+        }
+      } catch (error) {
+        console.error('Error loading cart from storage:', error)
+        // Clear corrupted cart data
+        try {
+          localStorage.removeItem('greenbox-cart')
+        } catch (e) {
+          console.error('Error clearing corrupted cart:', e)
+        }
       }
     }
   }
 
   const saveCartToStorage = (newCart: Cart) => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('greenbox-cart', JSON.stringify(newCart))
+    if (typeof window !== 'undefined' && mounted) {
+      try {
+        // Validate cart structure before saving
+        if (newCart && typeof newCart === 'object') {
+          localStorage.setItem('greenbox-cart', JSON.stringify(newCart))
+        }
+      } catch (error) {
+        console.error('Error saving cart to storage:', error)
+      }
     }
   }
 
@@ -198,6 +231,14 @@ export default function Home() {
     }, 0)
   }
 
+  const formatPrice = (price: number | string): string => {
+    if (typeof price === 'string') {
+      const numericPrice = parseFloat(price.replace(/[^0-9.]/g, ''))
+      return isNaN(numericPrice) ? '0.00' : numericPrice.toFixed(2)
+    }
+    return price.toFixed(2)
+  }
+
   const nextImage = () => {
     setCurrentImageIndex((prev) => (prev + 1) % carouselImages.length)
   }
@@ -206,7 +247,7 @@ export default function Home() {
     setCurrentImageIndex((prev) => (prev - 1 + carouselImages.length) % carouselImages.length)
   }
 
-  if (loading) {
+  if (loading || !mounted) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-green-50 to-green-100 flex items-center justify-center">
         <div className="text-center">
@@ -219,8 +260,8 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 to-green-100">
-      {/* Navigation */}
-      <nav className="bg-white shadow-sm">
+      {/* Cart Button */}
+      <div className="bg-white shadow-sm">
         <div className="container-custom py-4">
           <div className="flex justify-end items-center">
             <button
@@ -236,18 +277,17 @@ export default function Home() {
             </button>
           </div>
         </div>
-      </nav>
+      </div>
 
       {/* Hero Section */}
       <section className="section-padding">
         <div className="container-custom text-center">
           <div className="max-w-4xl mx-auto">
-            <h1 className="text-4xl sm:text-6xl font-bold text-green-600 mb-4">
-              GreenBox
-            </h1>
-            <h2 className="text-4xl sm:text-6xl font-bold text-gray-900 mb-6">
-              It's Worth Eating
-            </h2>
+            {/* Logo */}
+            <div className="flex justify-center mb-6">
+              <Logo showText={false} className="w-96 h-96" />
+            </div>
+            
             <p className="text-xl sm:text-2xl text-gray-600 mb-4">
               Delicious vegan meals delivered fresh to your door
             </p>
@@ -391,7 +431,7 @@ export default function Home() {
                   <div>
                     <h3 className="text-lg font-semibold text-gray-900">{item.name}</h3>
                     <p className="text-gray-600 text-sm mt-1">{item.description}</p>
-                    <p className="text-green-600 font-bold mt-2">${typeof item.price === 'string' ? parseFloat(item.price.replace(/[^0-9.]/g, '')).toFixed(2) : item.price.toFixed(2)}</p>
+                    <p className="text-green-600 font-bold mt-2">${formatPrice(item.price)}</p>
                   </div>
                 </div>
 
@@ -425,7 +465,7 @@ export default function Home() {
       </section>
 
       {/* Cart Sidebar */}
-      {isCartOpen && (
+      {mounted && isCartOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50">
           <div className="fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-xl">
             <div className="flex flex-col h-full">
@@ -435,6 +475,7 @@ export default function Home() {
                 <button
                   onClick={() => setIsCartOpen(false)}
                   className="text-gray-400 hover:text-gray-600"
+                  aria-label="Close cart"
                 >
                   <X className="w-6 h-6" />
                 </button>
@@ -457,12 +498,13 @@ export default function Home() {
                             <div key={item.id} className="flex justify-between items-center">
                               <div className="flex-1">
                                 <p className="font-medium">{item.name}</p>
-                                <p className="text-sm text-gray-600">${typeof item.price === 'string' ? parseFloat(item.price.replace(/[^0-9.]/g, '')).toFixed(2) : item.price.toFixed(2)}</p>
+                                <p className="text-sm text-gray-600">${formatPrice(item.price)}</p>
                               </div>
                               <div className="flex items-center space-x-2">
                                 <button
                                   onClick={() => updateCartItemQuantity(day, item.id, item.quantity - 1)}
                                   className="w-6 h-6 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center"
+                                  aria-label="Decrease quantity"
                                 >
                                   <Minus className="w-3 h-3" />
                                 </button>
@@ -470,12 +512,14 @@ export default function Home() {
                                 <button
                                   onClick={() => updateCartItemQuantity(day, item.id, item.quantity + 1)}
                                   className="w-6 h-6 rounded-full bg-green-100 hover:bg-green-200 flex items-center justify-center"
+                                  aria-label="Increase quantity"
                                 >
                                   <Plus className="w-3 h-3 text-green-600" />
                                 </button>
                                 <button
                                   onClick={() => removeFromCart(day, item.id)}
                                   className="text-red-500 hover:text-red-700 ml-2"
+                                  aria-label="Remove item"
                                 >
                                   <Trash2 className="w-4 h-4" />
                                 </button>

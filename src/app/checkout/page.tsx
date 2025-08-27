@@ -13,8 +13,10 @@ interface CartItem {
   price: number
   quantity: number
   day: string
-  add_ons: string[]
+  preferences: string[]
+  dietary_restrictions: string[]
   special_instructions: string
+  include_cutlery: boolean
 }
 
 interface Cart {
@@ -26,6 +28,7 @@ export default function CheckoutPage() {
   const router = useRouter()
   const [cart, setCart] = useState<Cart>({})
   const [specialRequests, setSpecialRequests] = useState('')
+  const [paymentMethod, setPaymentMethod] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
@@ -50,17 +53,23 @@ export default function CheckoutPage() {
   const getCartTotal = () => {
     return Object.values(cart).reduce((total, dayItems) => {
       return total + Object.values(dayItems).reduce((dayTotal, item) => {
-        const price = typeof item.price === 'string' ? parseFloat(item.price.replace(/[^0-9.]/g, '')) : item.price
-        return dayTotal + (price * item.quantity)
+        return dayTotal + (item.price * item.quantity)
       }, 0)
     }, 0)
+  }
+
+  const getDeliveryFee = () => {
+    return profile?.delivery_fee || 0
+  }
+
+  const getTotalWithDelivery = () => {
+    return getCartTotal() + getDeliveryFee()
   }
 
   const getDayTotal = (day: string) => {
     if (!cart[day]) return 0
     return Object.values(cart[day]).reduce((total, item) => {
-      const price = typeof item.price === 'string' ? parseFloat(item.price.replace(/[^0-9.]/g, '')) : item.price
-      return total + (price * item.quantity)
+      return total + (item.price * item.quantity)
     }, 0)
   }
 
@@ -74,6 +83,11 @@ export default function CheckoutPage() {
       alert('Your cart is empty.')
       return
     }
+    
+    if (!paymentMethod) {
+      alert('Please select a payment method.')
+      return
+    }
 
     setSubmitting(true)
     try {
@@ -82,17 +96,25 @@ export default function CheckoutPage() {
           day,
           menu_item_id: item.id,
           quantity: item.quantity,
-          add_ons: item.add_ons,
-          special_instructions: item.special_instructions
+          name: item.name,
+          price: item.price,
+          preferences: item.preferences,
+          dietary_restrictions: item.dietary_restrictions || [],
+          special_instructions: item.special_instructions,
+          include_cutlery: item.include_cutlery === true
         }))
       )
 
       const { error } = await supabase.from('orders').insert({
         user_id: user.id,
+        customer_name: profile?.full_name || '',
+        customer_phone: profile?.phone || '',
+        customer_address: profile?.address || '',
         cart_items: cartItems,
-        total_amount: getCartTotal(),
+        total_amount: getTotalWithDelivery(),
         delivery_days: Object.keys(cart),
         special_requests: specialRequests,
+        payment_method: paymentMethod,
         status: 'pending'
       })
 
@@ -153,12 +175,20 @@ export default function CheckoutPage() {
                           <div className="flex justify-between items-start">
                             <div>
                               <h4 className="font-medium">{item.name}</h4>
-                              <p className="text-sm text-gray-600">${typeof item.price === 'string' ? parseFloat(item.price.replace(/[^0-9.]/g, '')).toFixed(2) : item.price.toFixed(2)}</p>
-                              {item.add_ons.length > 0 && (
+                              <p className="text-sm text-gray-600">${item.price.toFixed(2)}</p>
+                              {item.preferences.length > 0 && (
                                 <p className="text-xs text-gray-500 mt-1">
-                                  Add-ons: {item.add_ons.join(', ')}
+                                  Preferences: {item.preferences.join(', ')}
                                 </p>
                               )}
+                              {item.dietary_restrictions && item.dietary_restrictions.length > 0 && (
+                                <p className="text-xs text-gray-500 mt-1">
+                                  Dietary: {item.dietary_restrictions.join(', ')}
+                                </p>
+                              )}
+                              <p className="text-xs text-gray-500 mt-1">
+                                Cutlery: {item.include_cutlery !== false ? 'Yes' : 'No'}
+                              </p>
                               {item.special_instructions && (
                                 <p className="text-xs text-gray-500 mt-1">
                                   Note: {item.special_instructions}
@@ -182,9 +212,21 @@ export default function CheckoutPage() {
               ))}
               
               <div className="border-t border-gray-300 pt-4">
-                <div className="flex justify-between items-center text-lg font-bold">
-                  <span>Total ({getCartItemCount()} items):</span>
-                  <span className="text-green-600">${getCartTotal().toFixed(2)}</span>
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center text-sm text-gray-600">
+                    <span>Subtotal ({getCartItemCount()} items):</span>
+                    <span>${getCartTotal().toFixed(2)}</span>
+                  </div>
+                  {getDeliveryFee() > 0 && (
+                    <div className="flex justify-between items-center text-sm text-gray-600">
+                      <span>Delivery Fee:</span>
+                      <span>${getDeliveryFee().toFixed(2)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between items-center text-lg font-bold border-t border-gray-300 pt-2">
+                    <span>Total:</span>
+                    <span className="text-green-600">${getTotalWithDelivery().toFixed(2)}</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -220,9 +262,44 @@ export default function CheckoutPage() {
                       <span className="font-medium">Preferences:</span> {profile.preferences}
                     </div>
                   )}
+                  {getDeliveryFee() > 0 && (
+                    <div className="text-sm text-gray-600">
+                      <span className="font-medium">Delivery Fee:</span> ${getDeliveryFee().toFixed(2)}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
+
+            {/* Payment Method Selection */}
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 mb-3">
+                Payment Method <span className="text-red-500">*</span>
+              </label>
+              <div className="space-y-3">
+                {[
+                  'Cash on delivery/pick up',
+                  'Cheque (written to Green Box)',
+                  'Bank Transfer (FCIB 1st Pay)',
+                  'Bank Transfer RBC',
+                  'Venmo/Cash App/Zelle (USD transfer)',
+                  'Online Payment link (VISA/MasterCard)'
+                ].map((method) => (
+                  <label key={method} className="flex items-center">
+                    <input
+                      type="radio"
+                      name="paymentMethod"
+                      value={method}
+                      checked={paymentMethod === method}
+                      onChange={(e) => setPaymentMethod(e.target.value)}
+                      className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300"
+                      required
+                    />
+                    <span className="ml-3 text-sm text-gray-700">{method}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
 
             {/* Special Requests */}
             <div className="mb-6">
@@ -232,7 +309,7 @@ export default function CheckoutPage() {
               <textarea
                 value={specialRequests}
                 onChange={(e) => setSpecialRequests(e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-none focus:ring-2 focus:ring-green-500"
                 placeholder="Any special requests for your entire order (e.g., delivery instructions, dietary notes)..."
                 rows={4}
               />

@@ -4,6 +4,8 @@ import './globals.css'
 import Navigation from '@/components/Navigation'
 import { AuthProvider } from '@/contexts/AuthContext'
 
+import ErrorBoundary from '@/components/ErrorBoundary'
+
 const inter = Inter({ 
   subsets: ['latin'],
   display: 'swap',
@@ -20,6 +22,16 @@ export const metadata: Metadata = {
   authors: [{ name: 'Green Box Barbados' }],
   creator: 'Green Box Barbados',
   publisher: 'Green Box Barbados',
+  icons: {
+    icon: [
+      { url: '/favicon.ico', sizes: 'any' },
+      { url: '/logo.jpeg', sizes: '32x32', type: 'image/jpeg' },
+    ],
+    apple: [
+      { url: '/logo.jpeg', sizes: '180x180', type: 'image/jpeg' },
+    ],
+    shortcut: '/favicon.ico',
+  },
   formatDetection: {
     email: false,
     address: false,
@@ -72,13 +84,21 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={inter.variable}>
+      <head>
+        <link rel="icon" href="/logo.jpeg?v=1" type="image/jpeg" />
+        <link rel="shortcut icon" href="/logo.jpeg?v=1" type="image/jpeg" />
+        <link rel="apple-touch-icon" href="/logo.jpeg?v=1" />
+      </head>
       <body className="bg-white text-gray-900 font-sans antialiased">
-        <AuthProvider>
-          <Navigation />
-          <main>
-            {children}
-          </main>
-        </AuthProvider>
+        <ErrorBoundary>
+          <AuthProvider>
+            <Navigation />
+            <main>
+              {children}
+            </main>
+    
+          </AuthProvider>
+        </ErrorBoundary>
       </body>
     </html>
   )

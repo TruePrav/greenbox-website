@@ -12,23 +12,44 @@ interface CartItem {
   price: number | string
   quantity: number
   day: string
-  add_ons: string[]
+  preferences: string[]
+  dietary_restrictions: string[]
   special_instructions: string
+  meal_size?: string
+  include_cutlery: boolean
 }
 
 interface Cart {
   [day: string]: { [itemId: string]: CartItem }
 }
 
-const addOns = [
-  'Extra sauce',
-  'No garlic',
-  'No onions',
-  'Extra spicy',
-  'Mild spice',
-  'No nuts',
-  'Gluten-free option'
+const preferences = [
+  'Mild',
+  'No raw onions',
+  'No corn',
+  'No mushrooms',
+  'No raw tomatoes',
+  'No cilantro',
+  'GF Preferred',
+  'Sauce on the side'
 ]
+
+const dietaryRestrictions = [
+  'Nut free',
+  'Soy free',
+  'Gluten free'
+]
+
+const mealSizes = [
+  { label: 'Snack Size', price: 25 },
+  { label: 'Full Meal', price: 35 }
+]
+
+const soupOfTheDay = {
+  name: 'Soup of the Day',
+  description: 'Fresh homemade soup made with seasonal ingredients',
+  price: 15
+}
 
 const days = ['Tuesday', 'Wednesday', 'Thursday']
 
@@ -42,24 +63,31 @@ export default function OrderNowPage() {
   const [isCartOpen, setIsCartOpen] = useState(false)
   const [specialRequests, setSpecialRequests] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [mounted, setMounted] = useState(false)
   
   // Local state for each item's form data
   const [itemFormData, setItemFormData] = useState<{
     [itemId: string]: {
       quantity: number
-      add_ons: string[]
+      preferences: string[]
+      dietary_restrictions: string[]
       special_instructions: string
+      meal_size?: string
+      include_cutlery: boolean
     }
   }>({})
 
   useEffect(() => {
+    setMounted(true)
     fetchData()
     loadCartFromStorage()
   }, [])
 
   useEffect(() => {
-    fetchMenuItems(selectedDay)
-  }, [selectedDay])
+    if (mounted) {
+      fetchMenuItems(selectedDay)
+    }
+  }, [selectedDay, mounted])
 
   const fetchData = async () => {
     try {
@@ -83,7 +111,7 @@ export default function OrderNowPage() {
 
   const fetchMenuItems = async (day: string) => {
     try {
-      console.log('Fetching menu items for day:', day)
+
       const { data: menuItemsData, error } = await supabase
         .from('menu_items')
         .select('*')
@@ -96,7 +124,7 @@ export default function OrderNowPage() {
         return
       }
 
-      console.log('Menu items fetched:', menuItemsData)
+      
       if (menuItemsData) {
         setMenuItems(menuItemsData)
       }
@@ -120,7 +148,7 @@ export default function OrderNowPage() {
     }
   }
 
-  const addToCart = (item: MenuItem, addOns: string[] = [], specialInstructions: string = '') => {
+  const addToCart = (item: MenuItem, preferences: string[] = [], dietaryRestrictions: string[] = [], specialInstructions: string = '', mealSize?: string, includeCutlery: boolean = false) => {
     const newCart = { ...cart }
     
     if (!newCart[selectedDay]) {
@@ -136,8 +164,11 @@ export default function OrderNowPage() {
         price: item.price,
         quantity: 1,
         day: selectedDay,
-        add_ons: addOns,
-        special_instructions: specialInstructions
+        preferences: preferences,
+        dietary_restrictions: dietaryRestrictions,
+        special_instructions: specialInstructions,
+        meal_size: mealSize,
+        include_cutlery: includeCutlery
       }
     }
 
@@ -172,8 +203,11 @@ export default function OrderNowPage() {
             price: menuItem.price,
             quantity: quantity,
             day: day,
-            add_ons: [],
-            special_instructions: ''
+            preferences: [],
+            dietary_restrictions: [],
+            special_instructions: '',
+            meal_size: '',
+            include_cutlery: false
           }
         } else {
           // If menu item not found, don't proceed
@@ -214,7 +248,16 @@ export default function OrderNowPage() {
   const getCartTotal = () => {
     return Object.values(cart).reduce((total, dayItems) => {
       return total + Object.values(dayItems).reduce((dayTotal, item) => {
-        const price = typeof item.price === 'string' ? parseFloat(item.price.replace(/[^0-9.]/g, '')) : item.price
+        let price = typeof item.price === 'string' ? parseFloat(item.price.replace(/[^0-9.]/g, '')) : item.price
+        
+        // Apply meal size pricing for Tuesday and Wednesday items
+        if (item.meal_size && (item.day === 'Tuesday' || item.day === 'Wednesday')) {
+          const sizeOption = mealSizes.find(size => size.label === item.meal_size)
+          if (sizeOption) {
+            price = sizeOption.price
+          }
+        }
+        
         return dayTotal + (price * item.quantity)
       }, 0)
     }, 0)
@@ -223,14 +266,46 @@ export default function OrderNowPage() {
   const getDayTotal = (day: string) => {
     if (!cart[day]) return 0
     return Object.values(cart[day]).reduce((total, item) => {
-      const price = typeof item.price === 'string' ? parseFloat(item.price.replace(/[^0-9.]/g, '')) : item.price
+      let price = typeof item.price === 'string' ? parseFloat(item.price.replace(/[^0-9.]/g, '')) : item.price
+      
+      // Apply meal size pricing for Tuesday and Wednesday items
+      if (item.meal_size && (item.day === 'Tuesday' || item.day === 'Wednesday')) {
+        const sizeOption = mealSizes.find(size => size.label === item.meal_size)
+        if (sizeOption) {
+          price = sizeOption.price
+        }
+      }
+      
       return total + (price * item.quantity)
     }, 0)
   }
 
   // Helper functions for local form data
   const getItemFormData = (itemId: string) => {
-    return itemFormData[itemId] || { quantity: 0, add_ons: [], special_instructions: '' }
+    const defaultData = { 
+      quantity: 0, 
+      preferences: [], 
+      dietary_restrictions: [], 
+      special_instructions: '', 
+      meal_size: '', 
+      include_cutlery: false
+    }
+    const existingData = itemFormData[itemId]
+    
+    // If no existing data, initialize with user's default preferences and dietary restrictions
+    if (!existingData && profile) {
+      const userPreferences = profile.preferences ? profile.preferences.split(', ').filter(p => p.trim()) : []
+      const userDietaryRestrictions = profile.dietary_restrictions ? profile.dietary_restrictions.split(', ').filter(d => d.trim()) : []
+      const userIncludeCutlery = profile.include_cutlery === true ? true : false
+      return { 
+        ...defaultData, 
+        preferences: userPreferences,
+        dietary_restrictions: userDietaryRestrictions,
+        include_cutlery: userIncludeCutlery
+      }
+    }
+    
+    return existingData || defaultData
   }
 
   const updateItemQuantity = (itemId: string, quantity: number) => {
@@ -243,17 +318,43 @@ export default function OrderNowPage() {
     }))
   }
 
-  const updateItemAddOns = (itemId: string, addOn: string, checked: boolean) => {
+  const updateItemPreferences = (itemId: string, preference: string, checked: boolean) => {
     const currentData = getItemFormData(itemId)
-    const newAddOns = checked
-      ? [...currentData.add_ons, addOn]
-      : currentData.add_ons.filter(a => a !== addOn)
+    const newPreferences = checked
+      ? [...currentData.preferences, preference]
+      : currentData.preferences.filter(p => p !== preference)
     
     setItemFormData(prev => ({
       ...prev,
       [itemId]: {
         ...currentData,
-        add_ons: newAddOns
+        preferences: newPreferences
+      }
+    }))
+  }
+
+  const updateItemDietaryRestrictions = (itemId: string, restriction: string, checked: boolean) => {
+    const currentData = getItemFormData(itemId)
+    const newDietaryRestrictions = checked
+      ? [...currentData.dietary_restrictions, restriction]
+      : currentData.dietary_restrictions.filter(d => d !== restriction)
+    
+    setItemFormData(prev => ({
+      ...prev,
+      [itemId]: {
+        ...currentData,
+        dietary_restrictions: newDietaryRestrictions
+      }
+    }))
+  }
+
+  const updateItemCutlery = (itemId: string, includeCutlery: boolean) => {
+    const currentData = getItemFormData(itemId)
+    setItemFormData(prev => ({
+      ...prev,
+      [itemId]: {
+        ...currentData,
+        include_cutlery: includeCutlery
       }
     }))
   }
@@ -269,11 +370,28 @@ export default function OrderNowPage() {
     }))
   }
 
+  const updateItemMealSize = (itemId: string, mealSize: string) => {
+    const currentData = getItemFormData(itemId)
+    setItemFormData(prev => ({
+      ...prev,
+      [itemId]: {
+        ...currentData,
+        meal_size: mealSize
+      }
+    }))
+  }
+
   const addItemToCart = (item: MenuItem) => {
     const formData = getItemFormData(item.id)
     if (formData.quantity <= 0) return
 
-    addToCart(item, formData.add_ons, formData.special_instructions)
+    // Check if meal size is selected for Tuesday and Wednesday items
+    if ((selectedDay === 'Tuesday' || selectedDay === 'Wednesday') && !formData.meal_size) {
+      alert('Please select a meal size for this item.')
+      return
+    }
+
+    addToCart(item, formData.preferences, formData.dietary_restrictions, formData.special_instructions, formData.meal_size, formData.include_cutlery)
     
     // Reset form data for this item
     setItemFormData(prev => {
@@ -301,7 +419,7 @@ export default function OrderNowPage() {
           day,
           menu_item_id: item.id,
           quantity: item.quantity,
-          add_ons: item.add_ons,
+          preferences: item.preferences,
           special_instructions: item.special_instructions
         }))
       )
@@ -419,9 +537,31 @@ export default function OrderNowPage() {
                     <div>
                       <h3 className="text-lg font-semibold text-gray-900">{item.name}</h3>
                       <p className="text-gray-600 text-sm mt-1">{item.description}</p>
-                      <p className="text-green-600 font-bold mt-2">${typeof item.price === 'string' ? parseFloat(item.price.replace(/[^0-9.]/g, '')).toFixed(2) : item.price.toFixed(2)}</p>
+                      <p className="text-green-600 font-bold mt-2">${item.price.toFixed(2)}</p>
                     </div>
                   </div>
+
+                  {/* Meal Size Selection for Tuesday and Wednesday */}
+                  {(selectedDay === 'Tuesday' || selectedDay === 'Wednesday') && (
+                    <div className="mb-4">
+                      <h4 className="text-sm font-medium text-gray-700 mb-2">Select Meal Size:</h4>
+                      <div className="grid grid-cols-2 gap-2">
+                        {mealSizes.map((size) => (
+                          <label key={size.label} className="flex items-center space-x-2 cursor-pointer">
+                            <input
+                              type="radio"
+                              name={`meal-size-${item.id}`}
+                              value={size.label}
+                              checked={formData.meal_size === size.label}
+                              onChange={(e) => updateItemMealSize(item.id, e.target.value)}
+                              className="text-green-600 focus:ring-green-500"
+                            />
+                            <span className="text-sm text-gray-700">{size.label} - ${size.price}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Quantity Selector */}
                   <div className="flex items-center space-x-3 mb-4">
@@ -442,22 +582,73 @@ export default function OrderNowPage() {
                     </button>
                   </div>
 
-                  {/* Add-ons */}
+                  {/* Preferences */}
                   {formData.quantity > 0 && (
                     <div className="mb-4">
-                      <h4 className="text-sm font-medium text-gray-700 mb-2">Add-ons:</h4>
+                      <h4 className="text-sm font-medium text-gray-700 mb-2">Preferences:</h4>
                       <div className="grid grid-cols-2 gap-2">
-                        {addOns.map((addOn) => (
-                          <label key={addOn} className="flex items-center space-x-2 cursor-pointer">
+                        {preferences.map((preference) => (
+                          <label key={preference} className="flex items-center space-x-2 cursor-pointer">
                             <input
                               type="checkbox"
-                              checked={formData.add_ons.includes(addOn)}
-                              onChange={(e) => updateItemAddOns(item.id, addOn, e.target.checked)}
+                              checked={formData.preferences.includes(preference)}
+                              onChange={(e) => updateItemPreferences(item.id, preference, e.target.checked)}
                               className="rounded border-gray-300 text-green-600 focus:ring-green-500"
                             />
-                            <span className="text-sm text-gray-700">{addOn}</span>
+                            <span className="text-sm text-gray-700">{preference}</span>
                           </label>
                         ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Dietary Restrictions */}
+                  {formData.quantity > 0 && (
+                    <div className="mb-4">
+                      <h4 className="text-sm font-medium text-gray-700 mb-2">Dietary Restrictions:</h4>
+                      <div className="grid grid-cols-2 gap-2">
+                        {dietaryRestrictions.map((restriction) => (
+                          <label key={restriction} className="flex items-center space-x-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={formData.dietary_restrictions.includes(restriction)}
+                              onChange={(e) => updateItemDietaryRestrictions(item.id, restriction, e.target.checked)}
+                              className="rounded border-gray-300 text-green-600 focus:ring-green-500"
+                            />
+                            <span className="text-sm text-gray-700">{restriction}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Cutlery Option */}
+                  {formData.quantity > 0 && (
+                    <div className="mb-4">
+                      <h4 className="text-sm font-medium text-gray-700 mb-2">Include Cutlery:</h4>
+                      <div className="space-y-2">
+                        <label className="flex items-center space-x-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            name={`cutlery-${item.id}`}
+                            value="true"
+                            checked={formData.include_cutlery === true}
+                            onChange={() => updateItemCutlery(item.id, true)}
+                            className="text-green-600 focus:ring-green-500"
+                          />
+                          <span className="text-sm text-gray-700">Yes, include cutlery</span>
+                        </label>
+                        <label className="flex items-center space-x-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            name={`cutlery-${item.id}`}
+                            value="false"
+                            checked={formData.include_cutlery === false}
+                            onChange={() => updateItemCutlery(item.id, false)}
+                            className="text-green-600 focus:ring-green-500"
+                          />
+                          <span className="text-sm text-gray-700">No, I don't need cutlery</span>
+                        </label>
                       </div>
                     </div>
                   )}
@@ -484,7 +675,12 @@ export default function OrderNowPage() {
                       <button
                         type="button"
                         onClick={() => addItemToCart(item)}
-                        className="w-full py-2 px-4 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
+                        disabled={(selectedDay === 'Tuesday' || selectedDay === 'Wednesday') && !formData.meal_size}
+                        className={`w-full py-2 px-4 rounded-lg transition-colors font-medium ${
+                          (selectedDay === 'Tuesday' || selectedDay === 'Wednesday') && !formData.meal_size
+                            ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                            : 'bg-green-600 text-white hover:bg-green-700'
+                        }`}
                       >
                         Add to Cart ({formData.quantity})
                       </button>
@@ -494,6 +690,156 @@ export default function OrderNowPage() {
               )
             })}
           </div>
+
+          {/* Soup of the Day - Tuesday Only */}
+          {selectedDay === 'Tuesday' && (
+            <div className="mt-6">
+              <h3 className="text-xl font-semibold text-gray-900 mb-4">Soup of the Day</h3>
+              <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+                <div className="flex justify-between items-start mb-3">
+                  <div>
+                    <h4 className="text-lg font-semibold text-gray-900">{soupOfTheDay.name}</h4>
+                    <p className="text-gray-600 text-sm mt-1">{soupOfTheDay.description}</p>
+                    <p className="text-green-600 font-bold mt-2">${soupOfTheDay.price}</p>
+                  </div>
+                </div>
+
+                {/* Quantity Selector for Soup */}
+                <div className="flex items-center space-x-3 mb-4">
+                  <button
+                    type="button"
+                    onClick={() => updateItemQuantity('soup-of-day', getItemFormData('soup-of-day').quantity - 1)}
+                    className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center"
+                  >
+                    <Minus className="w-4 h-4" />
+                  </button>
+                  <span className="text-lg font-medium w-8 text-center">{getItemFormData('soup-of-day').quantity}</span>
+                  <button
+                    type="button"
+                    onClick={() => updateItemQuantity('soup-of-day', getItemFormData('soup-of-day').quantity + 1)}
+                    className="w-8 h-8 rounded-full bg-green-100 hover:bg-green-200 flex items-center justify-center"
+                  >
+                    <Plus className="w-4 h-4 text-green-600" />
+                  </button>
+                </div>
+
+                {/* Preferences for Soup */}
+                {getItemFormData('soup-of-day').quantity > 0 && (
+                  <div className="mb-4">
+                    <h4 className="text-sm font-medium text-gray-700 mb-2">Preferences:</h4>
+                    <div className="grid grid-cols-2 gap-2">
+                      {preferences.map((preference) => (
+                        <label key={preference} className="flex items-center space-x-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={getItemFormData('soup-of-day').preferences.includes(preference)}
+                            onChange={(e) => updateItemPreferences('soup-of-day', preference, e.target.checked)}
+                            className="rounded border-gray-300 text-green-600 focus:ring-green-500"
+                          />
+                          <span className="text-sm text-gray-700">{preference}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Dietary Restrictions for Soup */}
+                {getItemFormData('soup-of-day').quantity > 0 && (
+                  <div className="mb-4">
+                    <h4 className="text-sm font-medium text-gray-700 mb-2">Dietary Restrictions:</h4>
+                    <div className="grid grid-cols-2 gap-2">
+                      {dietaryRestrictions.map((restriction) => (
+                        <label key={restriction} className="flex items-center space-x-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={getItemFormData('soup-of-day').dietary_restrictions.includes(restriction)}
+                            onChange={(e) => updateItemDietaryRestrictions('soup-of-day', restriction, e.target.checked)}
+                            className="rounded border-gray-300 text-green-600 focus:ring-green-500"
+                          />
+                          <span className="text-sm text-gray-700">{restriction}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Cutlery Option for Soup */}
+                {getItemFormData('soup-of-day').quantity > 0 && (
+                  <div className="mb-4">
+                    <h4 className="text-sm font-medium text-gray-700 mb-2">Include Cutlery:</h4>
+                    <div className="space-y-2">
+                      <label className="flex items-center space-x-2 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="cutlery-soup"
+                          value="true"
+                          checked={getItemFormData('soup-of-day').include_cutlery === true}
+                          onChange={() => updateItemCutlery('soup-of-day', true)}
+                          className="text-green-600 focus:ring-green-500"
+                        />
+                        <span className="text-sm text-gray-700">Yes, include cutlery</span>
+                      </label>
+                      <label className="flex items-center space-x-2 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="cutlery-soup"
+                          value="false"
+                          checked={getItemFormData('soup-of-day').include_cutlery === false}
+                          onChange={() => updateItemCutlery('soup-of-day', false)}
+                          className="text-green-600 focus:ring-green-500"
+                        />
+                        <span className="text-sm text-gray-700">No, I don't need cutlery</span>
+                      </label>
+                    </div>
+                  </div>
+                )}
+
+                {/* Special Instructions for Soup */}
+                {getItemFormData('soup-of-day').quantity > 0 && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Special Instructions:
+                    </label>
+                    <textarea
+                      value={getItemFormData('soup-of-day').special_instructions}
+                      onChange={(e) => updateItemSpecialInstructions('soup-of-day', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                      placeholder="Any special requests for this item..."
+                      rows={2}
+                    />
+                  </div>
+                )}
+
+                {/* Add to Cart Button for Soup */}
+                {getItemFormData('soup-of-day').quantity > 0 && (
+                  <div className="mt-4">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const soupItem = {
+                          id: 'soup-of-day',
+                          name: soupOfTheDay.name,
+                          price: soupOfTheDay.price,
+                          day: 'Tuesday'
+                        } as MenuItem
+                        addToCart(soupItem, getItemFormData('soup-of-day').preferences, getItemFormData('soup-of-day').dietary_restrictions, getItemFormData('soup-of-day').special_instructions, undefined, getItemFormData('soup-of-day').include_cutlery)
+                        
+                        // Reset form data for soup
+                        setItemFormData(prev => {
+                          const newData = { ...prev }
+                          delete newData['soup-of-day']
+                          return newData
+                        })
+                      }}
+                      className="w-full py-2 px-4 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
+                    >
+                      Add to Cart ({getItemFormData('soup-of-day').quantity})
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Special Requests */}
@@ -562,12 +908,31 @@ export default function OrderNowPage() {
                             <div className="flex justify-between items-start">
                               <div>
                                 <h4 className="font-medium">{item.name}</h4>
-                                <p className="text-sm text-gray-600">${typeof item.price === 'string' ? parseFloat(item.price.replace(/[^0-9.]/g, '')).toFixed(2) : item.price.toFixed(2)}</p>
-                                {(item.add_ons || []).length > 0 && (
+                                <p className="text-sm text-gray-600">
+                                  ${(() => {
+                                    let price = typeof item.price === 'string' ? parseFloat(item.price.replace(/[^0-9.]/g, '')) : item.price
+                                    
+                                    // Apply meal size pricing for Tuesday and Wednesday items
+                                    if (item.meal_size && (item.day === 'Tuesday' || item.day === 'Wednesday')) {
+                                      const sizeOption = mealSizes.find(size => size.label === item.meal_size)
+                                      if (sizeOption) {
+                                        price = sizeOption.price
+                                      }
+                                    }
+                                    
+                                    return price.toFixed(2)
+                                  })()}
+                                </p>
+                                {item.meal_size && (
                                   <p className="text-xs text-gray-500 mt-1">
-                                    Add-ons: {(item.add_ons || []).join(', ')}
+                                    Size: {item.meal_size}
                                   </p>
                                 )}
+                                                {(item.preferences || []).length > 0 && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    Preferences: {(item.preferences || []).join(', ')}
+                  </p>
+                )}
                                 {item.special_instructions && (
                                   <p className="text-xs text-gray-500 mt-1">
                                     Note: {item.special_instructions}

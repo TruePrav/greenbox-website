@@ -1,13 +1,58 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import Image from 'next/image'
 import { useAuth } from '@/contexts/AuthContext'
-import { ChevronDown, LogOut, User } from 'lucide-react'
+import { supabase } from '@/lib/supabase'
+import { ChevronDown, LogOut, User, Settings } from 'lucide-react'
+import Logo from './Logo'
 
 export default function Navigation() {
-  const { user, profile, signOut } = useAuth()
+  const { user, profile, loading: authLoading, signOut } = useAuth()
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
+  const [mounted, setMounted] = useState(false)
+  const [isAdmin, setIsAdmin] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  useEffect(() => {
+    if (user) {
+      checkAdminStatus()
+    } else {
+      setIsAdmin(false)
+    }
+  }, [user])
+
+  const checkAdminStatus = async () => {
+    if (!user) return
+    
+    try {
+
+      
+      // Check if user is admin by querying admin_users table
+      // Use maybeSingle() instead of single() to handle 0 rows gracefully
+      const { data, error } = await supabase
+        .from('admin_users')
+        .select('user_id')
+        .eq('user_id', user.id)
+        .maybeSingle() // This handles 0 rows gracefully
+
+      if (error) {
+        console.error('Admin status check error:', error)
+        setIsAdmin(false)
+      } else if (data) {
+        setIsAdmin(true)
+      } else {
+        setIsAdmin(false)
+      }
+    } catch (error) {
+      console.error('Unexpected error checking admin status:', error)
+      setIsAdmin(false)
+    }
+  }
 
   const handleSignOut = async () => {
     await signOut()
@@ -17,17 +62,21 @@ export default function Navigation() {
   return (
     <nav className="bg-white shadow-sm border-b border-gray-200">
       <div className="container-custom">
-        <div className="flex justify-between items-center h-16">
-          {/* Logo */}
-          <Link href="/" className="flex items-center space-x-2">
-            <div className="w-8 h-8 bg-green-600 rounded-full flex items-center justify-center text-white text-sm font-bold">
-              GB
-            </div>
-            <span className="text-xl font-bold text-gray-900">Green Box</span>
+        <div className="flex items-center justify-between h-16">
+          {/* Left: logo */}
+          <Link href="/" className="flex items-center shrink-0">
+            <Image
+              src="/greenbox-header-5.png"
+              alt="Green Box Barbados"
+              width={600}
+              height={168}
+              className="h-12 w-auto max-w-[180px] md:h-14 md:max-w-[220px] object-contain"
+              priority
+            />
           </Link>
 
-          {/* Navigation Links */}
-          <div className="hidden md:flex items-center space-x-8">
+          {/* Center: links (take remaining space) */}
+          <div className="hidden md:flex flex-1 items-center justify-center space-x-8">
             <Link href="/" className="text-gray-600 hover:text-green-600 transition-colors">
               Home
             </Link>
@@ -41,9 +90,14 @@ export default function Navigation() {
             )}
           </div>
 
-          {/* Auth Section */}
-          <div className="flex items-center space-x-4">
-            {user ? (
+          {/* Right: auth (don't let it shrink) */}
+          <div className="flex items-center space-x-4 shrink-0">
+            {authLoading ? (
+              <div className="flex items-center space-x-2 text-gray-500">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-green-600"></div>
+                <span className="text-sm">Loading...</span>
+              </div>
+            ) : user ? (
               <div className="relative">
                 <button
                   onClick={() => setIsDropdownOpen(!isDropdownOpen)}
@@ -56,7 +110,7 @@ export default function Navigation() {
                   <ChevronDown className="w-4 h-4" />
                 </button>
 
-                {isDropdownOpen && (
+                {mounted && isDropdownOpen && (
                   <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-50 border border-gray-200">
                     <Link
                       href="/account"
@@ -65,6 +119,16 @@ export default function Navigation() {
                     >
                       Account Settings
                     </Link>
+                    {isAdmin && (
+                      <Link
+                        href="/admin"
+                        className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
+                        onClick={() => setIsDropdownOpen(false)}
+                      >
+                        <Settings className="w-4 h-4" />
+                        <span>Admin Dashboard</span>
+                      </Link>
+                    )}
                     <button
                       onClick={handleSignOut}
                       className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
