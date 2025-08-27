@@ -1,24 +1,40 @@
 import { createClient } from '@supabase/supabase-js'
 
+// Try to get environment variables
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
-if (!supabaseUrl) {
-  console.error('NEXT_PUBLIC_SUPABASE_URL is not defined')
-  throw new Error('NEXT_PUBLIC_SUPABASE_URL is required')
+
+
+// Check if we have valid environment variables
+const hasValidEnvVars = supabaseUrl && supabaseAnonKey && 
+  supabaseUrl.length > 0 && supabaseAnonKey.length > 0 &&
+  supabaseUrl !== 'undefined' && supabaseAnonKey !== 'undefined'
+
+if (!hasValidEnvVars) {
+  console.error('❌ Missing or invalid Supabase environment variables:', {
+    url: supabaseUrl ? '✅ Set' : '❌ Missing',
+    key: supabaseAnonKey ? '✅ Set' : '❌ Missing',
+    urlValue: supabaseUrl,
+    keyValue: supabaseAnonKey ? `${supabaseAnonKey.substring(0, 20)}...` : 'undefined'
+  })
+  
+  // In development, throw error to catch issues early
+  if (process.env.NODE_ENV === 'development') {
+    throw new Error(`Missing or invalid Supabase environment variables: URL=${!!supabaseUrl}, KEY=${!!supabaseAnonKey}`)
+  }
 }
 
-if (!supabaseAnonKey) {
-  console.error('NEXT_PUBLIC_SUPABASE_ANON_KEY is not defined')
-  throw new Error('NEXT_PUBLIC_SUPABASE_ANON_KEY is required')
-}
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+// Create client with fallback values to prevent crashes
+export const supabase = createClient(
+  supabaseUrl || 'https://placeholder.supabase.co',
+  supabaseAnonKey || 'placeholder-key'
+)
 
 // Admin client for server-side operations
 export const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!, // server-only
+  supabaseUrl || 'https://placeholder.supabase.co',
+  process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder-key',
   { auth: { autoRefreshToken: false, persistSession: false } }
 )
 
