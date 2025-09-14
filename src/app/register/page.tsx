@@ -72,7 +72,17 @@ export default function RegisterPage() {
     setLongitude(Number(lng))
   }
 
-  const handleAddressValidation = (isValid: boolean) => setIsAddressValid(isValid)
+  const handleAddressValidation = (isValid: boolean) => {
+    setIsAddressValid(isValid)
+    // If address is manually entered (not from map), we should still allow registration
+    // with default coordinates if the address text is not empty
+    if (!isValid && address.trim() !== '') {
+      // Set default Barbados coordinates for manual address entry
+      setLatitude(13.1939)
+      setLongitude(-59.5432)
+      setIsAddressValid(true)
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -81,14 +91,24 @@ export default function RegisterPage() {
 
     // validations
     if (password !== confirmPassword) return alert('Passwords do not match')
-    if (!isAddressValid) return alert('Please enter a valid delivery address')
-    if (
-      latitude == null || longitude == null ||
-      Number.isNaN(Number(latitude)) || Number.isNaN(Number(longitude))
-    ) return alert('Please select a valid delivery address from the map')
     if (!fullName.trim() || !email.trim() || !phone.trim() || !address.trim())
       return alert('Please fill in all required fields')
     if (password.length < 6) return alert('Password must be at least 6 characters long')
+    
+    // Address validation - be more lenient if maps failed to load
+    if (!address.trim()) {
+      return alert('Please enter your delivery address')
+    }
+    
+    // If coordinates are invalid, use default Barbados coordinates
+    if (
+      latitude == null || longitude == null ||
+      Number.isNaN(Number(latitude)) || Number.isNaN(Number(longitude))
+    ) {
+      console.warn('Using default coordinates for address:', address)
+      setLatitude(13.1939)
+      setLongitude(-59.5432)
+    }
 
     setLoading(true)
           try {
@@ -272,7 +292,7 @@ export default function RegisterPage() {
           <div>
             <button
               type="submit"
-              disabled={loading || !isAddressValid}
+              disabled={loading || !address.trim()}
               className="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? 'Creating Account...' : 'Create Account'}

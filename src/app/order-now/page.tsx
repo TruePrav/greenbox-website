@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
-import { supabase, MenuItem, WeeklyMenu } from '@/lib/supabase'
-import { Plus, Minus, ShoppingCart, X, Trash2, AlertCircle } from 'lucide-react'
+import { supabase, MenuItem, WeeklyMenu, Product } from '@/lib/supabase'
+import { Plus, Minus, ShoppingCart, X, Trash2, AlertCircle, Package } from 'lucide-react'
 import Link from 'next/link'
 
 interface CartItem {
@@ -15,7 +15,6 @@ interface CartItem {
   preferences: string[]
   dietary_restrictions: string[]
   special_instructions: string
-  meal_size?: string
   include_cutlery: boolean
 }
 
@@ -40,30 +39,26 @@ const dietaryRestrictions = [
   'Gluten free'
 ]
 
-const mealSizes = [
-  { label: 'Snack Size', price: 25 },
-  { label: 'Full Meal', price: 35 }
-]
-
-const soupOfTheDay = {
-  name: 'Soup of the Day',
-  description: 'Fresh homemade soup made with seasonal ingredients',
-  price: 15
-}
+// Removed meal sizes - all meals are now $35
+// Removed soupOfTheDay - will be added as regular menu item
 
 const days = ['Tuesday', 'Wednesday', 'Thursday']
 
 export default function OrderNowPage() {
   const { user, profile } = useAuth()
   const [selectedDay, setSelectedDay] = useState('Tuesday')
+  const [activeTab, setActiveTab] = useState<'menu' | 'products'>('menu')
   const [weeklyMenu, setWeeklyMenu] = useState<WeeklyMenu | null>(null)
   const [menuItems, setMenuItems] = useState<MenuItem[]>([])
+  const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [cart, setCart] = useState<Cart>({})
   const [isCartOpen, setIsCartOpen] = useState(false)
   const [specialRequests, setSpecialRequests] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [mounted, setMounted] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [retryCount, setRetryCount] = useState(0)
   
   // Local state for each item's form data
   const [itemFormData, setItemFormData] = useState<{
@@ -72,7 +67,6 @@ export default function OrderNowPage() {
       preferences: string[]
       dietary_restrictions: string[]
       special_instructions: string
-      meal_size?: string
       include_cutlery: boolean
     }
   }>({})
@@ -81,6 +75,16 @@ export default function OrderNowPage() {
     setMounted(true)
     fetchData()
     loadCartFromStorage()
+    
+    // Add timeout to prevent infinite loading
+    const timeout = setTimeout(() => {
+      if (loading) {
+        console.warn('Loading timeout - forcing loading state to false')
+        setLoading(false)
+      }
+    }, 10000) // 10 second timeout
+    
+    return () => clearTimeout(timeout)
   }, [])
 
   useEffect(() => {
@@ -89,21 +93,52 @@ export default function OrderNowPage() {
     }
   }, [selectedDay, mounted])
 
-  const fetchData = async () => {
+  const fetchData = async (isRetry = false) => {
     try {
+      setLoading(true)
+      setError(null)
+      
       // Fetch weekly menu image
-      const { data: weeklyMenuData } = await supabase
+      const { data: weeklyMenuData, error: weeklyMenuError } = await supabase
         .from('weekly_menus')
         .select('*')
         .order('created_at', { ascending: false })
         .limit(1)
         .single()
 
-      if (weeklyMenuData) {
+      if (weeklyMenuError) {
+        console.error('Error fetching weekly menu:', weeklyMenuError)
+        if (!isRetry) {
+          setError('Failed to load weekly menu. Please try again.')
+        }
+      } else if (weeklyMenuData) {
         setWeeklyMenu(weeklyMenuData)
       }
+
+      // Fetch products
+      const { data: productsData, error: productsError } = await supabase
+        .from('products')
+        .select('*')
+        .eq('is_available', true)
+        .order('name')
+
+      if (productsError) {
+        console.error('Error fetching products:', productsError)
+        setProducts([])
+        if (!isRetry) {
+          setError('Failed to load products. Please try again.')
+        }
+      } else if (productsData) {
+        setProducts(productsData)
+      } else {
+        setProducts([])
+      }
     } catch (error) {
-      console.error('Error fetching weekly menu:', error)
+      console.error('Error fetching data:', error)
+      setProducts([])
+      if (!isRetry) {
+        setError('Failed to load data. Please check your connection and try again.')
+      }
     } finally {
       setLoading(false)
     }
@@ -111,7 +146,9 @@ export default function OrderNowPage() {
 
   const fetchMenuItems = async (day: string) => {
     try {
-
+      setLoading(true)
+      setError(null)
+      
       const { data: menuItemsData, error } = await supabase
         .from('menu_items')
         .select('*')
@@ -121,16 +158,29 @@ export default function OrderNowPage() {
 
       if (error) {
         console.error('Supabase error:', error)
+        setMenuItems([])
+        setError(`Failed to load menu for ${day}. Please try again.`)
         return
       }
 
-      
       if (menuItemsData) {
         setMenuItems(menuItemsData)
+      } else {
+        setMenuItems([])
       }
     } catch (error) {
       console.error('Error fetching menu items:', error)
+      setMenuItems([])
+      setError(`Failed to load menu for ${day}. Please try again.`)
+    } finally {
+      setLoading(false)
     }
+  }
+
+  const handleRetry = () => {
+    setRetryCount(prev => prev + 1)
+    fetchData(true)
+    fetchMenuItems(selectedDay)
   }
 
   const loadCartFromStorage = () => {
@@ -148,7 +198,7 @@ export default function OrderNowPage() {
     }
   }
 
-  const addToCart = (item: MenuItem, preferences: string[] = [], dietaryRestrictions: string[] = [], specialInstructions: string = '', mealSize?: string, includeCutlery: boolean = false) => {
+  const addToCart = (item: MenuItem, preferences: string[] = [], dietaryRestrictions: string[] = [], specialInstructions: string = '', includeCutlery: boolean = false) => {
     const newCart = { ...cart }
     
     if (!newCart[selectedDay]) {
@@ -167,8 +217,40 @@ export default function OrderNowPage() {
         preferences: preferences,
         dietary_restrictions: dietaryRestrictions,
         special_instructions: specialInstructions,
-        meal_size: mealSize,
         include_cutlery: includeCutlery
+      }
+    }
+
+    setCart(newCart)
+    saveCartToStorage(newCart)
+  }
+
+  const addProductToCart = (product: Product, quantity: number = 1) => {
+    const newCart = { ...cart }
+    
+    // Find the earliest day in the cart, or use the first available day
+    const cartDays = Object.keys(newCart)
+    const earliestDay = cartDays.length > 0 ? cartDays[0] : days[0]
+    
+    if (!newCart[earliestDay]) {
+      newCart[earliestDay] = {}
+    }
+
+    const productId = `product-${product.id}`
+    
+    if (newCart[earliestDay][productId]) {
+      newCart[earliestDay][productId].quantity += quantity
+    } else {
+      newCart[earliestDay][productId] = {
+        id: productId,
+        name: product.name,
+        price: product.price,
+        quantity: quantity,
+        day: earliestDay,
+        preferences: [],
+        dietary_restrictions: [],
+        special_instructions: '',
+        include_cutlery: false
       }
     }
 
@@ -206,7 +288,6 @@ export default function OrderNowPage() {
             preferences: [],
             dietary_restrictions: [],
             special_instructions: '',
-            meal_size: '',
             include_cutlery: false
           }
         } else {
@@ -248,16 +329,7 @@ export default function OrderNowPage() {
   const getCartTotal = () => {
     return Object.values(cart).reduce((total, dayItems) => {
       return total + Object.values(dayItems).reduce((dayTotal, item) => {
-        let price = typeof item.price === 'string' ? parseFloat(item.price.replace(/[^0-9.]/g, '')) : item.price
-        
-        // Apply meal size pricing for Tuesday and Wednesday items
-        if (item.meal_size && (item.day === 'Tuesday' || item.day === 'Wednesday')) {
-          const sizeOption = mealSizes.find(size => size.label === item.meal_size)
-          if (sizeOption) {
-            price = sizeOption.price
-          }
-        }
-        
+        const price = typeof item.price === 'string' ? parseFloat(item.price.replace(/[^0-9.]/g, '')) : item.price
         return dayTotal + (price * item.quantity)
       }, 0)
     }, 0)
@@ -266,16 +338,7 @@ export default function OrderNowPage() {
   const getDayTotal = (day: string) => {
     if (!cart[day]) return 0
     return Object.values(cart[day]).reduce((total, item) => {
-      let price = typeof item.price === 'string' ? parseFloat(item.price.replace(/[^0-9.]/g, '')) : item.price
-      
-      // Apply meal size pricing for Tuesday and Wednesday items
-      if (item.meal_size && (item.day === 'Tuesday' || item.day === 'Wednesday')) {
-        const sizeOption = mealSizes.find(size => size.label === item.meal_size)
-        if (sizeOption) {
-          price = sizeOption.price
-        }
-      }
-      
+      const price = typeof item.price === 'string' ? parseFloat(item.price.replace(/[^0-9.]/g, '')) : item.price
       return total + (price * item.quantity)
     }, 0)
   }
@@ -287,7 +350,6 @@ export default function OrderNowPage() {
       preferences: [], 
       dietary_restrictions: [], 
       special_instructions: '', 
-      meal_size: '', 
       include_cutlery: false
     }
     const existingData = itemFormData[itemId]
@@ -370,28 +432,12 @@ export default function OrderNowPage() {
     }))
   }
 
-  const updateItemMealSize = (itemId: string, mealSize: string) => {
-    const currentData = getItemFormData(itemId)
-    setItemFormData(prev => ({
-      ...prev,
-      [itemId]: {
-        ...currentData,
-        meal_size: mealSize
-      }
-    }))
-  }
 
   const addItemToCart = (item: MenuItem) => {
     const formData = getItemFormData(item.id)
     if (formData.quantity <= 0) return
 
-    // Check if meal size is selected for Tuesday and Wednesday items
-    if ((selectedDay === 'Tuesday' || selectedDay === 'Wednesday') && !formData.meal_size) {
-      alert('Please select a meal size for this item.')
-      return
-    }
-
-    addToCart(item, formData.preferences, formData.dietary_restrictions, formData.special_instructions, formData.meal_size, formData.include_cutlery)
+    addToCart(item, formData.preferences, formData.dietary_restrictions, formData.special_instructions, formData.include_cutlery)
     
     // Reset form data for this item
     setItemFormData(prev => {
@@ -446,12 +492,45 @@ export default function OrderNowPage() {
     }
   }
 
-  if (loading) {
+  if (loading && !error) {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto"></div>
           <p className="mt-4 text-gray-600">Loading menu...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="text-center max-w-md mx-auto p-6">
+          <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <AlertCircle className="w-8 h-8 text-red-600" />
+          </div>
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">Loading Error</h2>
+          <p className="text-gray-600 mb-6">{error}</p>
+          <div className="space-y-3">
+            <button
+              onClick={handleRetry}
+              className="w-full bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700 transition-colors"
+            >
+              Try Again
+            </button>
+            <button
+              onClick={() => window.location.reload()}
+              className="w-full bg-gray-200 text-gray-800 py-2 px-4 rounded-lg hover:bg-gray-300 transition-colors"
+            >
+              Refresh Page
+            </button>
+          </div>
+          {retryCount > 0 && (
+            <p className="text-sm text-gray-500 mt-4">
+              Retry attempts: {retryCount}
+            </p>
+          )}
         </div>
       </div>
     )
@@ -505,29 +584,58 @@ export default function OrderNowPage() {
           </div>
         )}
 
-        {/* Day Tabs */}
+        {/* Main Tabs */}
         <div className="mb-8">
-          <div className="flex justify-center space-x-2">
-            {days.map((day) => (
-              <button
-                key={day}
-                onClick={() => setSelectedDay(day)}
-                className={`px-6 py-3 rounded-full font-medium transition-all duration-200 ${
-                  selectedDay === day
-                    ? 'bg-green-600 text-white shadow-lg'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                {day}
-              </button>
-            ))}
+          <div className="flex justify-center space-x-2 mb-6">
+            <button
+              onClick={() => setActiveTab('menu')}
+              className={`px-6 py-3 rounded-full font-medium transition-all duration-200 ${
+                activeTab === 'menu'
+                  ? 'bg-green-600 text-white shadow-lg'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              Daily Menu
+            </button>
+            <button
+              onClick={() => setActiveTab('products')}
+              className={`px-6 py-3 rounded-full font-medium transition-all duration-200 ${
+                activeTab === 'products'
+                  ? 'bg-green-600 text-white shadow-lg'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              <Package className="w-4 h-4 inline mr-2" />
+              Products
+            </button>
           </div>
+
+          {/* Day Tabs - Only show for menu tab */}
+          {activeTab === 'menu' && (
+            <div className="flex justify-center space-x-2">
+              {days.map((day) => (
+                <button
+                  key={day}
+                  onClick={() => setSelectedDay(day)}
+                  className={`px-6 py-3 rounded-full font-medium transition-all duration-200 ${
+                    selectedDay === day
+                      ? 'bg-green-600 text-white shadow-lg'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  {day}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
-        {/* Menu Items */}
-        <div className="mb-8">
-          <h2 className="text-2xl font-semibold text-gray-900 mb-6">Select Your Items</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Content based on active tab */}
+        {activeTab === 'menu' ? (
+          /* Menu Items */
+          <div className="mb-8">
+            <h2 className="text-2xl font-semibold text-gray-900 mb-6">Select Your Items</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {menuItems.map((item) => {
               const formData = getItemFormData(item.id)
               
@@ -541,27 +649,6 @@ export default function OrderNowPage() {
                     </div>
                   </div>
 
-                  {/* Meal Size Selection for Tuesday and Wednesday */}
-                  {(selectedDay === 'Tuesday' || selectedDay === 'Wednesday') && (
-                    <div className="mb-4">
-                      <h4 className="text-sm font-medium text-gray-700 mb-2">Select Meal Size:</h4>
-                      <div className="grid grid-cols-2 gap-2">
-                        {mealSizes.map((size) => (
-                          <label key={size.label} className="flex items-center space-x-2 cursor-pointer">
-                            <input
-                              type="radio"
-                              name={`meal-size-${item.id}`}
-                              value={size.label}
-                              checked={formData.meal_size === size.label}
-                              onChange={(e) => updateItemMealSize(item.id, e.target.value)}
-                              className="text-green-600 focus:ring-green-500"
-                            />
-                            <span className="text-sm text-gray-700">{size.label} - ${size.price}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                  )}
 
                   {/* Quantity Selector */}
                   <div className="flex items-center space-x-3 mb-4">
@@ -675,12 +762,7 @@ export default function OrderNowPage() {
                       <button
                         type="button"
                         onClick={() => addItemToCart(item)}
-                        disabled={(selectedDay === 'Tuesday' || selectedDay === 'Wednesday') && !formData.meal_size}
-                        className={`w-full py-2 px-4 rounded-lg transition-colors font-medium ${
-                          (selectedDay === 'Tuesday' || selectedDay === 'Wednesday') && !formData.meal_size
-                            ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
-                            : 'bg-green-600 text-white hover:bg-green-700'
-                        }`}
+                        className="w-full py-2 px-4 rounded-lg transition-colors font-medium bg-green-600 text-white hover:bg-green-700"
                       >
                         Add to Cart ({formData.quantity})
                       </button>
@@ -691,156 +773,44 @@ export default function OrderNowPage() {
             })}
           </div>
 
-          {/* Soup of the Day - Tuesday Only */}
-          {selectedDay === 'Tuesday' && (
-            <div className="mt-6">
-              <h3 className="text-xl font-semibold text-gray-900 mb-4">Soup of the Day</h3>
-              <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
-                <div className="flex justify-between items-start mb-3">
-                  <div>
-                    <h4 className="text-lg font-semibold text-gray-900">{soupOfTheDay.name}</h4>
-                    <p className="text-gray-600 text-sm mt-1">{soupOfTheDay.description}</p>
-                    <p className="text-green-600 font-bold mt-2">${soupOfTheDay.price}</p>
-                  </div>
-                </div>
-
-                {/* Quantity Selector for Soup */}
-                <div className="flex items-center space-x-3 mb-4">
-                  <button
-                    type="button"
-                    onClick={() => updateItemQuantity('soup-of-day', getItemFormData('soup-of-day').quantity - 1)}
-                    className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center"
-                  >
-                    <Minus className="w-4 h-4" />
-                  </button>
-                  <span className="text-lg font-medium w-8 text-center">{getItemFormData('soup-of-day').quantity}</span>
-                  <button
-                    type="button"
-                    onClick={() => updateItemQuantity('soup-of-day', getItemFormData('soup-of-day').quantity + 1)}
-                    className="w-8 h-8 rounded-full bg-green-100 hover:bg-green-200 flex items-center justify-center"
-                  >
-                    <Plus className="w-4 h-4 text-green-600" />
-                  </button>
-                </div>
-
-                {/* Preferences for Soup */}
-                {getItemFormData('soup-of-day').quantity > 0 && (
-                  <div className="mb-4">
-                    <h4 className="text-sm font-medium text-gray-700 mb-2">Preferences:</h4>
-                    <div className="grid grid-cols-2 gap-2">
-                      {preferences.map((preference) => (
-                        <label key={preference} className="flex items-center space-x-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={getItemFormData('soup-of-day').preferences.includes(preference)}
-                            onChange={(e) => updateItemPreferences('soup-of-day', preference, e.target.checked)}
-                            className="rounded border-gray-300 text-green-600 focus:ring-green-500"
-                          />
-                          <span className="text-sm text-gray-700">{preference}</span>
-                        </label>
-                      ))}
+          </div>
+        ) : (
+          /* Products Section */
+          <div className="mb-8">
+            <h2 className="text-2xl font-semibold text-gray-900 mb-6">Available Products</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {products.map((product) => (
+                <div key={product.id} className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+                  <div className="flex justify-between items-start mb-3">
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-900">{product.name}</h3>
+                      <p className="text-green-600 font-bold mt-2">${product.price.toFixed(2)}</p>
                     </div>
                   </div>
-                )}
-
-                {/* Dietary Restrictions for Soup */}
-                {getItemFormData('soup-of-day').quantity > 0 && (
-                  <div className="mb-4">
-                    <h4 className="text-sm font-medium text-gray-700 mb-2">Dietary Restrictions:</h4>
-                    <div className="grid grid-cols-2 gap-2">
-                      {dietaryRestrictions.map((restriction) => (
-                        <label key={restriction} className="flex items-center space-x-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={getItemFormData('soup-of-day').dietary_restrictions.includes(restriction)}
-                            onChange={(e) => updateItemDietaryRestrictions('soup-of-day', restriction, e.target.checked)}
-                            className="rounded border-gray-300 text-green-600 focus:ring-green-500"
-                          />
-                          <span className="text-sm text-gray-700">{restriction}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Cutlery Option for Soup */}
-                {getItemFormData('soup-of-day').quantity > 0 && (
-                  <div className="mb-4">
-                    <h4 className="text-sm font-medium text-gray-700 mb-2">Include Cutlery:</h4>
-                    <div className="space-y-2">
-                      <label className="flex items-center space-x-2 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="cutlery-soup"
-                          value="true"
-                          checked={getItemFormData('soup-of-day').include_cutlery === true}
-                          onChange={() => updateItemCutlery('soup-of-day', true)}
-                          className="text-green-600 focus:ring-green-500"
-                        />
-                        <span className="text-sm text-gray-700">Yes, include cutlery</span>
-                      </label>
-                      <label className="flex items-center space-x-2 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="cutlery-soup"
-                          value="false"
-                          checked={getItemFormData('soup-of-day').include_cutlery === false}
-                          onChange={() => updateItemCutlery('soup-of-day', false)}
-                          className="text-green-600 focus:ring-green-500"
-                        />
-                        <span className="text-sm text-gray-700">No, I don't need cutlery</span>
-                      </label>
-                    </div>
-                  </div>
-                )}
-
-                {/* Special Instructions for Soup */}
-                {getItemFormData('soup-of-day').quantity > 0 && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Special Instructions:
-                    </label>
-                    <textarea
-                      value={getItemFormData('soup-of-day').special_instructions}
-                      onChange={(e) => updateItemSpecialInstructions('soup-of-day', e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-                      placeholder="Any special requests for this item..."
-                      rows={2}
-                    />
-                  </div>
-                )}
-
-                {/* Add to Cart Button for Soup */}
-                {getItemFormData('soup-of-day').quantity > 0 && (
-                  <div className="mt-4">
+                  
+                  <p className="text-gray-600 text-sm mb-4 line-clamp-3">{product.description}</p>
+                  
+                  <div className="flex items-center space-x-3">
                     <button
                       type="button"
-                      onClick={() => {
-                        const soupItem = {
-                          id: 'soup-of-day',
-                          name: soupOfTheDay.name,
-                          price: soupOfTheDay.price,
-                          day: 'Tuesday'
-                        } as MenuItem
-                        addToCart(soupItem, getItemFormData('soup-of-day').preferences, getItemFormData('soup-of-day').dietary_restrictions, getItemFormData('soup-of-day').special_instructions, undefined, getItemFormData('soup-of-day').include_cutlery)
-                        
-                        // Reset form data for soup
-                        setItemFormData(prev => {
-                          const newData = { ...prev }
-                          delete newData['soup-of-day']
-                          return newData
-                        })
-                      }}
-                      className="w-full py-2 px-4 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
+                      onClick={() => addProductToCart(product, 1)}
+                      className="flex-1 py-2 px-4 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
                     >
-                      Add to Cart ({getItemFormData('soup-of-day').quantity})
+                      Add to Cart
                     </button>
                   </div>
-                )}
-              </div>
+                </div>
+              ))}
+              
+              {products.length === 0 && (
+                <div className="col-span-full text-center py-8">
+                  <Package className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-500">No products available at the moment</p>
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Special Requests */}
         <div className="mb-8">
@@ -866,10 +836,10 @@ export default function OrderNowPage() {
       </div>
 
       {/* Cart Button */}
-      <div className="fixed bottom-6 right-6 z-50">
+      <div className="fixed bottom-20 right-6 z-50">
         <button
           onClick={() => setIsCartOpen(true)}
-          className="bg-green-600 text-white p-4 rounded-full shadow-lg hover:bg-green-700 transition-colors"
+          className="bg-green-600 text-white p-4 rounded-full shadow-lg hover:bg-green-700 transition-colors relative"
         >
           <ShoppingCart className="w-6 h-6" />
           {getCartItemCount() > 0 && (
@@ -910,24 +880,10 @@ export default function OrderNowPage() {
                                 <h4 className="font-medium">{item.name}</h4>
                                 <p className="text-sm text-gray-600">
                                   ${(() => {
-                                    let price = typeof item.price === 'string' ? parseFloat(item.price.replace(/[^0-9.]/g, '')) : item.price
-                                    
-                                    // Apply meal size pricing for Tuesday and Wednesday items
-                                    if (item.meal_size && (item.day === 'Tuesday' || item.day === 'Wednesday')) {
-                                      const sizeOption = mealSizes.find(size => size.label === item.meal_size)
-                                      if (sizeOption) {
-                                        price = sizeOption.price
-                                      }
-                                    }
-                                    
+                                    const price = typeof item.price === 'string' ? parseFloat(item.price.replace(/[^0-9.]/g, '')) : item.price
                                     return price.toFixed(2)
                                   })()}
                                 </p>
-                                {item.meal_size && (
-                                  <p className="text-xs text-gray-500 mt-1">
-                                    Size: {item.meal_size}
-                                  </p>
-                                )}
                                                 {(item.preferences || []).length > 0 && (
                   <p className="text-xs text-gray-500 mt-1">
                     Preferences: {(item.preferences || []).join(', ')}

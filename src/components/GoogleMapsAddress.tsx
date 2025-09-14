@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { MapPin, AlertCircle } from 'lucide-react'
+import { MapPin, AlertCircle, RefreshCw, Map } from 'lucide-react'
 import Script from 'next/script'
 
 interface GoogleMapsAddressProps {
@@ -34,6 +34,10 @@ export default function GoogleMapsAddress({
   const [error, setError] = useState('')
   const [isGoogleMapsLoaded, setIsGoogleMapsLoaded] = useState(false)
   const [isMapInitialized, setIsMapInitialized] = useState(false)
+  const [mapsError, setMapsError] = useState(false)
+  const [retryCount, setRetryCount] = useState(0)
+  const [isRetrying, setIsRetrying] = useState(false)
+  const [showFallback, setShowFallback] = useState(false)
 
   // DOM/instance refs
   const wrapperRef = useRef<HTMLDivElement>(null) // relative wrapper
@@ -52,6 +56,46 @@ export default function GoogleMapsAddress({
     if (!ok) setError('Please enter your address')
     else setError('')
   }, [onValidationChange])
+
+  const handleMapsError = useCallback(() => {
+    console.error('Google Maps failed to load')
+    setMapsError(true)
+    setShowFallback(true)
+    setError('Google Maps failed to load. You can still enter your address manually.')
+  }, [])
+
+  const retryMapsLoad = useCallback(() => {
+    if (retryCount >= 3) {
+      setShowFallback(true)
+      setError('Google Maps failed to load after multiple attempts. Please enter your address manually.')
+      return
+    }
+
+    setIsRetrying(true)
+    setMapsError(false)
+    setError('')
+    setRetryCount(prev => prev + 1)
+    
+    // Reset states
+    setIsGoogleMapsLoaded(false)
+    setIsMapInitialized(false)
+    
+    // Force reload the script
+    const script = document.getElementById('google-maps-script')
+    if (script) {
+      script.remove()
+    }
+    
+    // Clear any existing Google Maps objects
+    if (window.google) {
+      delete window.google
+    }
+    
+    // Reload after a short delay
+    setTimeout(() => {
+      window.location.reload()
+    }, 1000)
+  }, [retryCount])
 
   const handleAddressInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const newAddress = e.target.value
@@ -165,11 +209,13 @@ export default function GoogleMapsAddress({
       }
 
       setIsMapInitialized(true)
+      setMapsError(false)
+      setShowFallback(false)
     } catch (err) {
       console.error('Error initializing Google Maps:', err)
-      setError('Failed to initialize map. Please refresh and try again.')
+      handleMapsError()
     }
-  }, [coords.lat, coords.lng, isMapInitialized, onAddressChange, validateLocation])
+  }, [coords.lat, coords.lng, isMapInitialized, onAddressChange, validateLocation, handleMapsError])
 
   // Global callback setup
   useEffect(() => {
@@ -177,7 +223,17 @@ export default function GoogleMapsAddress({
     window.initGoogleMaps = () => {
       setIsGoogleMapsLoaded(true)
     }
+    
+    // Set up timeout for Google Maps loading
+    const timeoutId = setTimeout(() => {
+      if (!isGoogleMapsLoaded && !mapsError) {
+        console.warn('Google Maps loading timeout')
+        handleMapsError()
+      }
+    }, 15000) // 15 second timeout
+    
     return () => {
+      clearTimeout(timeoutId)
       mountedRef.current = false
       if (window.initGoogleMaps) delete window.initGoogleMaps
 
@@ -196,7 +252,7 @@ export default function GoogleMapsAddress({
       // autocomplete has no official destroy; drop the ref
       autocompleteRef.current = null
     }
-  }, [])
+  }, [isGoogleMapsLoaded, mapsError, handleMapsError])
 
   // Initialize after script load
   useEffect(() => {
@@ -221,16 +277,18 @@ export default function GoogleMapsAddress({
 
   return (
     <>
-      {/* Ensure script loads only once via id */}
-      <Script
-        id="google-maps-script"
-        src={`https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&callback=initGoogleMaps`}
-        strategy="afterInteractive"
-        onError={(e) => {
-          console.error('Failed to load Google Maps script:', e)
-          setError('Failed to load Google Maps. Please refresh the page and try again.')
-        }}
-      />
+      {/* Only load script if not in fallback mode and haven't exceeded retry limit */}
+      {!showFallback && retryCount < 3 && (
+        <Script
+          id="google-maps-script"
+          src={`https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&callback=initGoogleMaps`}
+          strategy="afterInteractive"
+          onError={(e) => {
+            console.error('Failed to load Google Maps script:', e)
+            handleMapsError()
+          }}
+        />
+      )}
 
       <div className="space-y-4">
         <div>
@@ -266,33 +324,73 @@ export default function GoogleMapsAddress({
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">Map Location</label>
 
-          {/* Relative wrapper so overlay can sit ABOVE the map without being its child */}
-          <div ref={wrapperRef} className="relative">
-            {/* Map container must remain EMPTY for the lifetime of the map */}
-            <div
-              ref={mapContainerRef}
-              className="w-full h-64 rounded-lg border border-gray-300"
-              style={{ minHeight: 256 }}
-            />
-
-            {/* Loading overlay as a sibling, not a child inside the map DOM tree */}
-            {!isMapInitialized && (
-              <div className="absolute inset-0 flex items-center justify-center bg-gray-50/70 rounded-lg pointer-events-none">
-                <div className="text-center">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600 mx-auto mb-2"></div>
-                  <p className="text-gray-600 font-medium">
-                    {!isGoogleMapsLoaded ? '⏳ Loading Google Maps...' : '🗺️ Initializing map...'}
-                  </p>
-                  <p className="text-sm text-gray-500">
-                    {!isGoogleMapsLoaded ? 'Loading map services' : 'Setting up interactive map'}
-                  </p>
+          {/* Fallback UI when maps fail to load */}
+          {showFallback ? (
+            <div className="w-full h-64 rounded-lg border border-gray-300 bg-gray-50 flex items-center justify-center">
+              <div className="text-center p-6">
+                <Map className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">Map Unavailable</h3>
+                <p className="text-gray-600 mb-4">
+                  Google Maps failed to load. You can still enter your address manually above.
+                </p>
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={retryMapsLoad}
+                    disabled={isRetrying || retryCount >= 3}
+                    className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <RefreshCw className={`w-4 h-4 mr-2 ${isRetrying ? 'animate-spin' : ''}`} />
+                    {isRetrying ? 'Retrying...' : 'Try Again'}
+                  </button>
+                  {retryCount >= 3 && (
+                    <p className="text-sm text-gray-500">
+                      Maximum retry attempts reached. Please refresh the page to try again.
+                    </p>
+                  )}
                 </div>
               </div>
-            )}
-          </div>
+            </div>
+          ) : (
+            /* Normal map UI */
+            <div ref={wrapperRef} className="relative">
+              {/* Map container must remain EMPTY for the lifetime of the map */}
+              <div
+                ref={mapContainerRef}
+                className="w-full h-64 rounded-lg border border-gray-300"
+                style={{ minHeight: 256 }}
+              />
+
+              {/* Loading overlay as a sibling, not a child inside the map DOM tree */}
+              {!isMapInitialized && (
+                <div className="absolute inset-0 flex items-center justify-center bg-gray-50/70 rounded-lg pointer-events-none">
+                  <div className="text-center">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600 mx-auto mb-2"></div>
+                    <p className="text-gray-600 font-medium">
+                      {!isGoogleMapsLoaded ? '⏳ Loading Google Maps...' : '🗺️ Initializing map...'}
+                    </p>
+                    <p className="text-sm text-gray-500">
+                      {!isGoogleMapsLoaded ? 'Loading map services' : 'Setting up interactive map'}
+                    </p>
+                    {mapsError && (
+                      <button
+                        type="button"
+                        onClick={retryMapsLoad}
+                        className="mt-2 text-sm text-green-600 hover:text-green-700 underline"
+                      >
+                        Retry loading map
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="mt-2 text-xs text-gray-500">
-            {isMapInitialized
+            {showFallback
+              ? '⚠️ Map unavailable - address can still be entered manually'
+              : isMapInitialized
               ? '✅ Interactive map loaded - type an address above or drag the marker to adjust location'
               : 'Loading map and address autocomplete...'}
           </div>

@@ -3,7 +3,7 @@ import { Inter } from 'next/font/google'
 import './globals.css'
 import Navigation from '@/components/Navigation'
 import { AuthProvider } from '@/contexts/AuthContext'
-
+import WhatsAppContact from '@/components/WhatsAppContact'
 import ErrorBoundary from '@/components/ErrorBoundary'
 
 const inter = Inter({ 
@@ -96,7 +96,7 @@ export default function RootLayout({
             <main>
               {children}
             </main>
-    
+            <WhatsAppContact />
           </AuthProvider>
         </ErrorBoundary>
       </body>

@@ -45,7 +45,7 @@ export default function Logo({
   return (
     <Link href="/" className={`flex items-center space-x-2 ${wrapperClassName}`}>
       <div className={`relative ${className || sizeClasses[size]}`}>
-        <Image src="/logo.jpeg" alt="Green Box Barbados Logo" fill className="object-contain" priority />
+        <Image src="/greenbox-trans.png" alt="Green Box Barbados Logo" fill className="object-contain" priority />
       </div>
       {showText && (
         <span className={`font-bold ${textSizes[size]} ${textColors[variant]}`}>

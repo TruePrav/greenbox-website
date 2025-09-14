@@ -90,6 +90,17 @@ export default function AccountPage() {
 
   const handleAddressValidation = (isValid: boolean) => {
     setIsAddressValid(isValid)
+    // If address is manually entered (not from map), we should still allow profile updates
+    // with default coordinates if the address text is not empty
+    if (!isValid && formData.address.trim() !== '') {
+      // Set default Barbados coordinates for manual address entry
+      setFormData(prev => ({
+        ...prev,
+        latitude: 13.1939,
+        longitude: -59.5432
+      }))
+      setIsAddressValid(true)
+    }
   }
 
   const handlePreferenceToggle = (preference: string, isChecked: boolean) => {
@@ -133,10 +144,23 @@ export default function AccountPage() {
       return
     }
     
-    // Validate address before submission
-    if (!isAddressValid || !formData.address.trim()) {
-      setError('Please enter a valid delivery address')
+    // Validate address - be more lenient if maps failed to load
+    if (!formData.address.trim()) {
+      setError('Please enter your delivery address')
       return
+    }
+    
+    // If coordinates are invalid, use default Barbados coordinates
+    if (
+      formData.latitude == null || formData.longitude == null ||
+      Number.isNaN(Number(formData.latitude)) || Number.isNaN(Number(formData.longitude))
+    ) {
+      console.warn('Using default coordinates for address:', formData.address)
+      setFormData(prev => ({
+        ...prev,
+        latitude: 13.1939,
+        longitude: -59.5432
+      }))
     }
 
     // Validate cutlery preference is selected
@@ -267,8 +291,8 @@ export default function AccountPage() {
                       ✓ Valid delivery address
                     </span>
                   ) : (
-                    <span className="text-red-600 flex items-center">
-                      ⚠ Please select a valid address from the map
+                    <span className="text-amber-600 flex items-center">
+                      ⚠ Address entered manually - will use default coordinates
                     </span>
                   )}
                 </div>

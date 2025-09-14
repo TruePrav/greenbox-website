@@ -116,4 +116,14 @@ export interface AdminUser {
   user_id: string
   role: string
   created_at: string
+}
+
+export interface Product {
+  id: string
+  name: string
+  price: number
+  description: string
+  is_available: boolean
+  created_at: string
+  updated_at: string
 } 

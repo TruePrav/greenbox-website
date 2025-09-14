@@ -69,14 +69,25 @@ interface Order {
   }
 }
 
+interface Product {
+  id: string
+  name: string
+  price: number
+  description: string
+  is_available: boolean
+  created_at: string
+  updated_at: string
+}
+
 export default function AdminDashboard() {
   const { user } = useAuth()
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null)
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'menu' | 'carousel' | 'orders' | 'users'>('menu')
+  const [activeTab, setActiveTab] = useState<'menu' | 'carousel' | 'orders' | 'users' | 'products'>('menu')
   const [selectedDay, setSelectedDay] = useState('Tuesday')
   const [menuItems, setMenuItems] = useState<MenuItem[]>([])
   const [carouselImages, setCarouselImages] = useState<CarouselImage[]>([])
+  const [products, setProducts] = useState<Product[]>([])
   const [orders, setOrders] = useState<Order[]>([])
   const [ordersLoading, setOrdersLoading] = useState(false)
   
@@ -89,8 +100,11 @@ export default function AdminDashboard() {
   const [showEditMenuModal, setShowEditMenuModal] = useState(false)
   const [showAddCarouselModal, setShowAddCarouselModal] = useState(false)
   const [showEditCarouselModal, setShowEditCarouselModal] = useState(false)
+  const [showAddProductModal, setShowAddProductModal] = useState(false)
+  const [showEditProductModal, setShowEditProductModal] = useState(false)
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null)
   const [editingImage, setEditingImage] = useState<CarouselImage | null>(null)
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   const [uploading, setUploading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
@@ -118,6 +132,13 @@ export default function AdminDashboard() {
     imageFile: null as File | null
   })
 
+  const [productForm, setProductForm] = useState({
+    name: '',
+    price: '',
+    description: '',
+    is_available: true
+  })
+
   useEffect(() => {
     checkAdminAccess()
   }, [user])
@@ -126,6 +147,7 @@ export default function AdminDashboard() {
     if (isAdmin) {
       fetchMenuItems()
       fetchCarouselImages()
+      fetchProducts()
       fetchOrders()
       fetchUsers()
     }
@@ -190,6 +212,25 @@ export default function AdminDashboard() {
     } catch (error) {
       console.error('Error fetching carousel images:', error)
       setCarouselImages([])
+    }
+  }
+
+  const fetchProducts = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .order('name')
+
+      if (error) {
+        console.error('Error fetching products:', error)
+        setProducts([])
+        return
+      }
+      setProducts(data || [])
+    } catch (error) {
+      console.error('Error fetching products:', error)
+      setProducts([])
     }
   }
 
@@ -514,6 +555,87 @@ export default function AdminDashboard() {
     }
   }
 
+  const handleAddProduct = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!productForm.name || !productForm.price) {
+      alert('Please fill in all required fields')
+      return
+    }
+
+    setSubmitting(true)
+    try {
+      const { error } = await supabase
+        .from('products')
+        .insert([{
+          name: productForm.name,
+          price: parseFloat(productForm.price),
+          description: productForm.description,
+          is_available: productForm.is_available
+        }])
+
+      if (error) throw error
+
+      setShowAddProductModal(false)
+      setProductForm({ name: '', price: '', description: '', is_available: true })
+      fetchProducts()
+    } catch (error) {
+      console.error('Error adding product:', error)
+      alert('Failed to add product')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleEditProduct = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingProduct || !productForm.name || !productForm.price) {
+      alert('Please fill in all required fields')
+      return
+    }
+
+    setSubmitting(true)
+    try {
+      const { error } = await supabase
+        .from('products')
+        .update({
+          name: productForm.name,
+          price: parseFloat(productForm.price),
+          description: productForm.description,
+          is_available: productForm.is_available
+        })
+        .eq('id', editingProduct.id)
+
+      if (error) throw error
+
+      setShowEditProductModal(false)
+      setEditingProduct(null)
+      setProductForm({ name: '', price: '', description: '', is_available: true })
+      fetchProducts()
+    } catch (error) {
+      console.error('Error updating product:', error)
+      alert('Failed to update product')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleDeleteProduct = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this product?')) return
+
+    try {
+      const { error } = await supabase
+        .from('products')
+        .delete()
+        .eq('id', id)
+
+      if (error) throw error
+      fetchProducts()
+    } catch (error) {
+      console.error('Error deleting product:', error)
+      alert('Failed to delete product')
+    }
+  }
+
   const exportOrdersToCSV = () => {
     
     
@@ -731,6 +853,16 @@ export default function AdminDashboard() {
                 }`}
               >
                 Users
+              </button>
+              <button
+                onClick={() => setActiveTab('products')}
+                className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                  activeTab === 'products'
+                    ? 'border-green-500 text-green-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                Products
               </button>
             </nav>
           </div>
@@ -1199,6 +1331,104 @@ export default function AdminDashboard() {
             </div>
           </div>
         )}
+
+        {/* Products Section */}
+        {activeTab === 'products' && (
+          <div className="bg-white rounded-lg shadow">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <div className="flex justify-between items-center">
+                <h2 className="text-xl font-semibold text-gray-900">Manage Products</h2>
+                <button
+                  onClick={() => setShowAddProductModal(true)}
+                  className="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                >
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add Product
+                </button>
+              </div>
+            </div>
+
+            {/* Products List */}
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Name
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Price
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Description
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Status
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {products.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-6 py-4 whitespace-nowrap text-center text-sm text-gray-500">
+                        No products found.
+                      </td>
+                    </tr>
+                  ) : (
+                    products.map((product) => (
+                      <tr key={product.id}>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                          {product.name}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          ${product.price.toFixed(2)} BBD
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-500 max-w-xs truncate">
+                          {product.description}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                            product.is_available 
+                              ? 'bg-green-100 text-green-800' 
+                              : 'bg-red-100 text-red-800'
+                          }`}>
+                            {product.is_available ? 'Available' : 'Unavailable'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
+                          <button
+                            onClick={() => {
+                              setEditingProduct(product)
+                              setProductForm({
+                                name: product.name,
+                                price: product.price.toString(),
+                                description: product.description,
+                                is_available: product.is_available
+                              })
+                              setShowEditProductModal(true)
+                            }}
+                            className="text-blue-600 hover:text-blue-900"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleDeleteProduct(product.id)}
+                            className="text-red-600 hover:text-red-900"
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Add Menu Item Modal */}
@@ -1621,6 +1851,173 @@ export default function AdminDashboard() {
                   className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
                 >
                   Update User
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add Product Modal */}
+      {showAddProductModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
+            <h3 className="text-lg font-semibold mb-4">Add Product</h3>
+            <form onSubmit={handleAddProduct}>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={productForm.name}
+                    onChange={(e) => setProductForm({ ...productForm, name: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                    placeholder="Product name"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Price (BBD) *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={productForm.price}
+                    onChange={(e) => setProductForm({ ...productForm, price: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                    placeholder="0.00"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Description
+                  </label>
+                  <textarea
+                    value={productForm.description}
+                    onChange={(e) => setProductForm({ ...productForm, description: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                    placeholder="Product description"
+                    rows={3}
+                  />
+                </div>
+                <div>
+                  <label className="flex items-center">
+                    <input
+                      type="checkbox"
+                      checked={productForm.is_available}
+                      onChange={(e) => setProductForm({ ...productForm, is_available: e.target.checked })}
+                      className="rounded border-gray-300 text-green-600 focus:ring-green-500"
+                    />
+                    <span className="ml-2 text-sm text-gray-700">Available for purchase</span>
+                  </label>
+                </div>
+              </div>
+              <div className="flex justify-end space-x-3 mt-6">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddProductModal(false)
+                    setProductForm({ name: '', price: '', description: '', is_available: true })
+                  }}
+                  className="px-4 py-2 text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50"
+                >
+                  {submitting ? 'Adding...' : 'Add Product'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Product Modal */}
+      {showEditProductModal && editingProduct && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
+            <h3 className="text-lg font-semibold mb-4">Edit Product</h3>
+            <form onSubmit={handleEditProduct}>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={productForm.name}
+                    onChange={(e) => setProductForm({ ...productForm, name: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                    placeholder="Product name"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Price (BBD) *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={productForm.price}
+                    onChange={(e) => setProductForm({ ...productForm, price: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                    placeholder="0.00"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Description
+                  </label>
+                  <textarea
+                    value={productForm.description}
+                    onChange={(e) => setProductForm({ ...productForm, description: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                    placeholder="Product description"
+                    rows={3}
+                  />
+                </div>
+                <div>
+                  <label className="flex items-center">
+                    <input
+                      type="checkbox"
+                      checked={productForm.is_available}
+                      onChange={(e) => setProductForm({ ...productForm, is_available: e.target.checked })}
+                      className="rounded border-gray-300 text-green-600 focus:ring-green-500"
+                    />
+                    <span className="ml-2 text-sm text-gray-700">Available for purchase</span>
+                  </label>
+                </div>
+              </div>
+              <div className="flex justify-end space-x-3 mt-6">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditProductModal(false)
+                    setEditingProduct(null)
+                    setProductForm({ name: '', price: '', description: '', is_available: true })
+                  }}
+                  className="px-4 py-2 text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50"
+                >
+                  {submitting ? 'Updating...' : 'Update Product'}
                 </button>
               </div>
             </form>
