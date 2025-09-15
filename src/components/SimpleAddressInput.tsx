@@ -58,7 +58,7 @@ export default function SimpleAddressInput({
   }, [onValidationChange])
 
   // Geocode address manually
-  const geocodeAddress = useCallback(async (addressToGeocode: string) => {
+  const geocodeAddress = useCallback((addressToGeocode: string) => {
     if (!window.google?.maps?.Geocoder) {
       console.warn('Geocoder not available, using default coordinates')
       validateLocation(addressToGeocode, DEFAULT_LAT, DEFAULT_LNG)
@@ -66,18 +66,16 @@ export default function SimpleAddressInput({
     }
     
     const geocoder = new window.google.maps.Geocoder()
-    try {
-      console.log('Attempting to geocode:', addressToGeocode)
-      
-      // Try with country restriction first
-      const { results, status } = await geocoder.geocode({ 
-        address: addressToGeocode, 
-        componentRestrictions: { country: 'BB' } 
-      })
-      
+    console.log('Attempting to geocode:', addressToGeocode)
+    
+    // Try with country restriction first
+    geocoder.geocode({ 
+      address: addressToGeocode, 
+      componentRestrictions: { country: 'BB' } 
+    }, (results: any, status: any) => {
       console.log('Geocoding result (with country restriction):', { status, resultsCount: results?.length })
       
-      if (status === 'OK' && results[0]) {
+      if (status === 'OK' && results && results[0]) {
         const newLat = results[0].geometry.location.lat()
         const newLng = results[0].geometry.location.lng()
         setCoords({ lat: newLat, lng: newLng })
@@ -88,27 +86,27 @@ export default function SimpleAddressInput({
       } else if (status === 'ZERO_RESULTS') {
         // If no results with country restriction, try without it
         console.log('No results with country restriction, trying without...')
-        const { results: results2, status: status2 } = await geocoder.geocode({ 
+        geocoder.geocode({ 
           address: addressToGeocode
+        }, (results2: any, status2: any) => {
+          console.log('Geocoding result (no country restriction):', { status2, resultsCount: results2?.length })
+          
+          if (status2 === 'OK' && results2 && results2[0]) {
+            const newLat = results2[0].geometry.location.lat()
+            const newLng = results2[0].geometry.location.lng()
+            setCoords({ lat: newLat, lng: newLng })
+            onAddressChange(addressToGeocode, newLat, newLng)
+            validateLocation(addressToGeocode, newLat, newLng)
+            setError('')
+            console.log('Geocoding successful without country restriction:', { newLat, newLng })
+          } else {
+            console.log('Geocoding failed completely, using default coordinates')
+            setCoords({ lat: DEFAULT_LAT, lng: DEFAULT_LNG })
+            onAddressChange(addressToGeocode, DEFAULT_LAT, DEFAULT_LNG)
+            validateLocation(addressToGeocode, DEFAULT_LAT, DEFAULT_LNG)
+            setError('')
+          }
         })
-        
-        console.log('Geocoding result (no country restriction):', { status2, resultsCount: results2?.length })
-        
-        if (status2 === 'OK' && results2[0]) {
-          const newLat = results2[0].geometry.location.lat()
-          const newLng = results2[0].geometry.location.lng()
-          setCoords({ lat: newLat, lng: newLng })
-          onAddressChange(addressToGeocode, newLat, newLng)
-          validateLocation(addressToGeocode, newLat, newLng)
-          setError('')
-          console.log('Geocoding successful without country restriction:', { newLat, newLng })
-        } else {
-          console.log('Geocoding failed completely, using default coordinates')
-          setCoords({ lat: DEFAULT_LAT, lng: DEFAULT_LNG })
-          onAddressChange(addressToGeocode, DEFAULT_LAT, DEFAULT_LNG)
-          validateLocation(addressToGeocode, DEFAULT_LAT, DEFAULT_LNG)
-          setError('')
-        }
       } else {
         console.log('Geocoding failed with status:', status, 'using default coordinates')
         setCoords({ lat: DEFAULT_LAT, lng: DEFAULT_LNG })
@@ -116,13 +114,7 @@ export default function SimpleAddressInput({
         validateLocation(addressToGeocode, DEFAULT_LAT, DEFAULT_LNG)
         setError('')
       }
-    } catch (err) {
-      console.log('Error during geocoding, using default coordinates:', err)
-      setCoords({ lat: DEFAULT_LAT, lng: DEFAULT_LNG })
-      onAddressChange(addressToGeocode, DEFAULT_LAT, DEFAULT_LNG)
-      validateLocation(addressToGeocode, DEFAULT_LAT, DEFAULT_LNG)
-      setError('')
-    }
+    })
   }, [onAddressChange, validateLocation])
 
   // Manual address suggestions using Google Places API
