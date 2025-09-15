@@ -1,0 +1,3 @@
+[33m952210d[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmaster[m[33m, [m[1;31morigin/master[m[33m)[m Fix Google Maps autocomplete loading on Vercel
+[33m8e41b77[m Add Google Maps debug component for Vercel deployment troubleshooting
+[33m3880ff4[m Fix admin page UUID parsing errors and image upload functionality

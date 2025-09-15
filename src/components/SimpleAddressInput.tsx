@@ -138,53 +138,63 @@ export default function SimpleAddressInput({
     }
 
     try {
-      const service = new window.google.maps.places.AutocompleteService()
-      
-      // Try with country restriction first
-      const request = {
-        input: query,
-        componentRestrictions: { country: 'BB' },
-        types: ['address']
-      }
-
-      service.getPlacePredictions(request, (predictions: any, status: any) => {
-        console.log('Suggestions request result:', { status, predictionsCount: predictions?.length })
+      // Use the old AutocompleteService API (it still works despite deprecation warning)
+      if (window.google.maps.places.AutocompleteService) {
+        console.log('Using AutocompleteService API')
+        const service = new window.google.maps.places.AutocompleteService()
         
-        if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions) {
-          const suggestionList = predictions.map((prediction: any) => prediction.description)
-          setSuggestions(suggestionList)
-          setShowSuggestions(true)
-          setSelectedSuggestionIndex(-1)
-          console.log('Suggestions found:', suggestionList)
-        } else if (status === window.google.maps.places.PlacesServiceStatus.ZERO_RESULTS) {
-          // Try without country restriction
-          console.log('No results with country restriction, trying without...')
-          const request2 = {
-            input: query,
-            types: ['address']
-          }
-          
-          service.getPlacePredictions(request2, (predictions2: any, status2: any) => {
-            console.log('Suggestions request result (no country):', { status2, predictionsCount: predictions2?.length })
-            
-            if (status2 === window.google.maps.places.PlacesServiceStatus.OK && predictions2) {
-              const suggestionList = predictions2.map((prediction: any) => prediction.description)
-              setSuggestions(suggestionList)
-              setShowSuggestions(true)
-              setSelectedSuggestionIndex(-1)
-              console.log('Suggestions found (no country):', suggestionList)
-            } else {
-              setSuggestions([])
-              setShowSuggestions(false)
-              console.log('No suggestions found even without country restriction')
-            }
-          })
-        } else {
-          setSuggestions([])
-          setShowSuggestions(false)
-          console.log('Suggestions request failed:', status)
+        // Try with country restriction first
+        const request = {
+          input: query,
+          componentRestrictions: { country: 'BB' },
+          types: ['address']
         }
-      })
+
+        console.log('Making autocomplete request:', request)
+
+        service.getPlacePredictions(request, (predictions: any, status: any) => {
+          console.log('Suggestions request result:', { status, predictionsCount: predictions?.length })
+          
+          if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions) {
+            const suggestionList = predictions.map((prediction: any) => prediction.description)
+            console.log('Suggestions found:', suggestionList)
+            setSuggestions(suggestionList)
+            setShowSuggestions(true)
+            setSelectedSuggestionIndex(-1)
+          } else if (status === window.google.maps.places.PlacesServiceStatus.ZERO_RESULTS) {
+            // Try without country restriction
+            console.log('No results with country restriction, trying without...')
+            const request2 = {
+              input: query,
+              types: ['address']
+            }
+            
+            service.getPlacePredictions(request2, (predictions2: any, status2: any) => {
+              console.log('Suggestions request result (no country):', { status2, predictionsCount: predictions2?.length })
+              
+              if (status2 === window.google.maps.places.PlacesServiceStatus.OK && predictions2) {
+                const suggestionList = predictions2.map((prediction: any) => prediction.description)
+                console.log('Suggestions found (no country):', suggestionList)
+                setSuggestions(suggestionList)
+                setShowSuggestions(true)
+                setSelectedSuggestionIndex(-1)
+              } else {
+                console.log('No suggestions found')
+                setSuggestions([])
+                setShowSuggestions(false)
+              }
+            })
+          } else {
+            console.log('Autocomplete error:', status)
+            setSuggestions([])
+            setShowSuggestions(false)
+          }
+        })
+      } else {
+        console.log('AutocompleteService not available')
+        setSuggestions([])
+        setShowSuggestions(false)
+      }
     } catch (err) {
       console.error('Error getting suggestions:', err)
       setSuggestions([])
@@ -304,7 +314,7 @@ export default function SimpleAddressInput({
     }
     
     // Re-enable suggestions if user wants to change
-    if (!isAutocompleteActive && window.google?.maps?.places) {
+    if (!isAutocompleteActive && window.google?.maps?.places?.AutocompleteService) {
       console.log('Input focused - re-enabling suggestions for address change')
       setupAutocomplete()
     }
@@ -316,7 +326,7 @@ export default function SimpleAddressInput({
     }
     
     // Re-enable suggestions if user wants to change
-    if (!isAutocompleteActive && window.google?.maps?.places) {
+    if (!isAutocompleteActive && window.google?.maps?.places?.AutocompleteService) {
       console.log('Input clicked - re-enabling suggestions for address change')
       setupAutocomplete()
     }
@@ -326,7 +336,7 @@ export default function SimpleAddressInput({
     setHasUserEdited(true)
     
     // Re-enable suggestions when user starts typing
-    if (!isAutocompleteActive && window.google?.maps?.places) {
+    if (!isAutocompleteActive && window.google?.maps?.places?.AutocompleteService) {
       console.log('User typing - re-enabling suggestions')
       setupAutocomplete()
     }
