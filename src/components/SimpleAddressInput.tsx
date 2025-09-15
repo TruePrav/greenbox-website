@@ -432,6 +432,13 @@ export default function SimpleAddressInput({
   useEffect(() => {
     mountedRef.current = true
     
+    // Check if Google Maps is already loaded
+    if (window.google?.maps?.places?.AutocompleteService) {
+      console.log('Google Maps already loaded')
+      setIsGoogleMapsLoaded(true)
+      return
+    }
+    
     // Prevent multiple instances from conflicting
     if (typeof window.initGoogleMaps === 'function') {
       console.log('Google Maps already being loaded by another instance')
@@ -446,15 +453,31 @@ export default function SimpleAddressInput({
     }
     
     // Check if Google Maps is already available
-    if (window.google?.maps && window.google.maps.places?.Autocomplete) {
+    if (window.google?.maps && window.google.maps.places?.AutocompleteService) {
       console.log('Google Maps already available')
       setIsGoogleMapsLoaded(true)
       return
     }
 
+    // Fallback: Check for Google Maps loading every 500ms for up to 10 seconds
+    const checkInterval = setInterval(() => {
+      if (window.google?.maps?.places?.AutocompleteService) {
+        console.log('Google Maps detected via fallback check')
+        setIsGoogleMapsLoaded(true)
+        clearInterval(checkInterval)
+      }
+    }, 500)
+
+    // Clear interval after 10 seconds
+    const timeout = setTimeout(() => {
+      clearInterval(checkInterval)
+    }, 10000)
+
     return () => {
       mountedRef.current = false
       listenersRef.current.forEach(listener => listener.remove())
+      clearInterval(checkInterval)
+      clearTimeout(timeout)
       // Clean up global callback
       if (typeof window.initGoogleMaps === 'function') {
         delete (window as any).initGoogleMaps
@@ -512,26 +535,24 @@ export default function SimpleAddressInput({
 
   return (
     <>
-      {/* Load Google Maps script only if not already loaded */}
-      {!window.google?.maps && (
-        <Script
-          id="google-maps-script"
-          src={`https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&callback=initGoogleMaps`}
-          strategy="afterInteractive"
-          onLoad={() => {
-            console.log('Google Maps script loaded')
-            if (mountedRef.current) {
-              setIsGoogleMapsLoaded(true)
-            }
-          }}
-          onError={() => {
-            console.error('Failed to load Google Maps script')
-            if (mountedRef.current) {
-              setIsGoogleMapsLoaded(true) // Still allow manual entry
-            }
-          }}
-        />
-      )}
+      {/* Load Google Maps script */}
+      <Script
+        id="google-maps-script"
+        src={`https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&callback=initGoogleMaps`}
+        strategy="afterInteractive"
+        onLoad={() => {
+          console.log('Google Maps script loaded')
+          if (mountedRef.current) {
+            setIsGoogleMapsLoaded(true)
+          }
+        }}
+        onError={() => {
+          console.error('Failed to load Google Maps script')
+          if (mountedRef.current) {
+            setIsGoogleMapsLoaded(true) // Still allow manual entry
+          }
+        }}
+      />
 
       <div className="space-y-4">
         <div>
