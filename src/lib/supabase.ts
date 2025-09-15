@@ -1,10 +1,8 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 
 // Try to get environment variables
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-
-
 
 // Check if we have valid environment variables
 const hasValidEnvVars = supabaseUrl && supabaseAnonKey && 
@@ -25,18 +23,32 @@ if (!hasValidEnvVars) {
   }
 }
 
+// Singleton pattern to prevent multiple client instances
+let supabaseInstance: SupabaseClient | null = null
+let supabaseAdminInstance: SupabaseClient | null = null
+
 // Create client with fallback values to prevent crashes
-export const supabase = createClient(
-  supabaseUrl || 'https://placeholder.supabase.co',
-  supabaseAnonKey || 'placeholder-key'
-)
+export const supabase = (() => {
+  if (!supabaseInstance) {
+    supabaseInstance = createClient(
+      supabaseUrl || 'https://placeholder.supabase.co',
+      supabaseAnonKey || 'placeholder-key'
+    )
+  }
+  return supabaseInstance
+})()
 
 // Admin client for server-side operations
-export const supabaseAdmin = createClient(
-  supabaseUrl || 'https://placeholder.supabase.co',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder-key',
-  { auth: { autoRefreshToken: false, persistSession: false } }
-)
+export const supabaseAdmin = (() => {
+  if (!supabaseAdminInstance) {
+    supabaseAdminInstance = createClient(
+      supabaseUrl || 'https://placeholder.supabase.co',
+      process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder-key',
+      { auth: { autoRefreshToken: false, persistSession: false } }
+    )
+  }
+  return supabaseAdminInstance
+})()
 
 // Database types
 export interface UserProfile {
@@ -124,6 +136,7 @@ export interface Product {
   price: number
   description: string
   is_available: boolean
+  images: string[]
   created_at: string
   updated_at: string
 } 

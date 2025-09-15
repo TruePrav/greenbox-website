@@ -75,6 +75,7 @@ interface Product {
   price: number
   description: string
   is_available: boolean
+  images: string[]
   created_at: string
   updated_at: string
 }
@@ -136,7 +137,8 @@ export default function AdminDashboard() {
     name: '',
     price: '',
     description: '',
-    is_available: true
+    is_available: true,
+    images: [] as string[]
   })
 
   useEffect(() => {
@@ -145,11 +147,22 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     if (isAdmin) {
-      fetchMenuItems()
-      fetchCarouselImages()
-      fetchProducts()
-      fetchOrders()
-      fetchUsers()
+      // Batch all data fetching to prevent sequential loading
+      const fetchAllData = async () => {
+        try {
+          await Promise.allSettled([
+            fetchMenuItems(),
+            fetchCarouselImages(),
+            fetchProducts(),
+            fetchOrders(),
+            fetchUsers()
+          ])
+        } catch (error) {
+          console.error('Error fetching admin data:', error)
+        }
+      }
+      
+      fetchAllData()
     }
   }, [isAdmin, selectedDay])
 
@@ -182,11 +195,17 @@ export default function AdminDashboard() {
 
   const fetchMenuItems = async () => {
     try {
-      const { data, error } = await supabase
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Menu items fetch timeout')), 5000)
+      )
+
+      const menuPromise = supabase
         .from('menu_items')
         .select('*')
         .eq('day', selectedDay)
         .order('name')
+
+      const { data, error } = await Promise.race([menuPromise, timeoutPromise]) as any
 
       if (error) throw error
       setMenuItems(data || [])
@@ -197,10 +216,16 @@ export default function AdminDashboard() {
 
   const fetchCarouselImages = async () => {
     try {
-      const { data, error } = await supabase
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Carousel images fetch timeout')), 5000)
+      )
+
+      const carouselPromise = supabase
         .from('menu_images')
         .select('*')
         .order('order_num')
+
+      const { data, error } = await Promise.race([carouselPromise, timeoutPromise]) as any
 
       if (error) {
         console.error('Error fetching carousel images:', error)
@@ -217,10 +242,16 @@ export default function AdminDashboard() {
 
   const fetchProducts = async () => {
     try {
-      const { data, error } = await supabase
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Products fetch timeout')), 5000)
+      )
+
+      const productsPromise = supabase
         .from('products')
         .select('*')
         .order('name')
+
+      const { data, error } = await Promise.race([productsPromise, timeoutPromise]) as any
 
       if (error) {
         console.error('Error fetching products:', error)
@@ -238,11 +269,17 @@ export default function AdminDashboard() {
     setOrdersLoading(true)
     
     try {
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Orders fetch timeout')), 10000)
+      )
+
       // First, get the orders
-      const { data: ordersData, error: ordersError } = await supabase
+      const ordersPromise = supabase
         .from('orders')
         .select('*')
         .order('created_at', { ascending: false })
+
+      const { data: ordersData, error: ordersError } = await Promise.race([ordersPromise, timeoutPromise]) as any
 
       if (ordersError) {
         console.error('Orders query error:', ordersError)
@@ -251,7 +288,7 @@ export default function AdminDashboard() {
 
       // If we have orders, fetch user emails for each order
       if (ordersData && ordersData.length > 0) {
-        const userIds = [...new Set(ordersData.map(order => order.user_id).filter(Boolean))]
+        const userIds = [...new Set(ordersData.map((order: any) => order.user_id).filter(Boolean))]
         
         // Fetch user profiles for these user IDs
         const { data: userProfiles, error: userError } = await supabase
@@ -264,28 +301,71 @@ export default function AdminDashboard() {
           // Continue without user data
         }
 
-        // Fetch menu items for cart items
-        const menuItemIds = [...new Set(ordersData.flatMap(order =>
+        // Fetch menu items and products for cart items
+        const allItemIds = [...new Set(ordersData.flatMap((order: any) =>
           order.cart_items?.map((item: any) => item.menu_item_id).filter(Boolean) || []
         ))]
+        
+        console.log('Orders data sample:', ordersData.slice(0, 2))
+        console.log('All item IDs:', allItemIds)
+
+        // Separate menu items from products - filter out invalid UUIDs
+        const menuItemIds = allItemIds.filter((id: any) => {
+          // Must be a valid UUID format (not starting with "product-" and matches UUID pattern)
+          return typeof id === 'string' && !id.startsWith('product-') && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+        })
+        const productIds = allItemIds.filter((id: any) => typeof id === 'string' && id.startsWith('product-'))
+        
+        console.log('Menu item IDs:', menuItemIds)
+        console.log('Product IDs:', productIds)
 
         let menuItems: any[] = []
-        if (menuItemIds.length > 0) {
-          const { data: menuItemsData, error: menuError } = await supabase
-            .from('menu_items')
-            .select('*')
-            .in('id', menuItemIds)
+        let products: any[] = []
 
-          if (menuError) {
-            console.error('Menu items query error:', menuError)
+        // Fetch menu items (with error handling)
+        if (menuItemIds.length > 0) {
+          try {
+            console.log('Fetching menu items for IDs:', menuItemIds)
+            const { data: menuItemsData, error: menuError } = await supabase
+              .from('menu_items')
+              .select('*')
+              .in('id', menuItemIds)
+
+            if (menuError) {
+              console.warn('Menu items query failed, continuing without menu item data:', menuError)
+              menuItems = []
+            } else {
+              console.log('Menu items fetched successfully:', menuItemsData?.length || 0, 'items')
+              menuItems = menuItemsData || []
+            }
+          } catch (error) {
+            console.warn('Menu items query failed with exception, continuing without menu item data:', error)
+            menuItems = []
+          }
+        } else {
+          console.log('No menu item IDs to fetch')
+          menuItems = []
+        }
+
+        // Fetch products
+        if (productIds.length > 0) {
+          console.log('Fetching products for IDs:', productIds)
+          const { data: productsData, error: productError } = await supabase
+            .from('products')
+            .select('*')
+            .in('id', productIds)
+
+          if (productError) {
+            console.error('Products query error:', productError)
           } else {
-            menuItems = menuItemsData || []
+            console.log('Products fetched successfully:', productsData?.length || 0, 'items')
+            products = productsData || []
           }
         }
 
         // Since we can't directly query auth.users from the client, we'll need to store email in user_profiles
         // For now, we'll use the user_profiles data we have
-        const ordersWithUsers = ordersData.map(order => {
+        const ordersWithUsers = ordersData.map((order: any) => {
           const userProfile = userProfiles?.find(profile => profile.id === order.user_id)
           const user = {
             email: userProfile?.email || 'Email not available' // Get email directly from user_profiles
@@ -293,13 +373,19 @@ export default function AdminDashboard() {
           
 
           
-          // Enhance cart items with menu item data
+          // Enhance cart items with menu item and product data
           const enhancedCartItems = order.cart_items?.map((item: any) => {
             const menuItem = menuItems.find(mi => mi.id === item.menu_item_id)
+            const product = products.find(p => p.id === item.menu_item_id)
+            
+            // Use menu item data if found, otherwise use product data
+            const itemData = menuItem || product
+            
             return {
               ...item,
-              name: menuItem?.name || item.name || 'Unknown Item',
-              price: menuItem?.price || item.price || 0
+              name: itemData?.name || item.name || 'Unknown Item',
+              price: itemData?.price || item.price || 0,
+              type: menuItem ? 'menu' : product ? 'product' : 'unknown'
             }
           }) || []
 
@@ -326,10 +412,16 @@ export default function AdminDashboard() {
     setUsersLoading(true)
     
     try {
-      const { data: usersData, error: usersError } = await supabase
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Users fetch timeout')), 5000)
+      )
+
+      const usersPromise = supabase
         .from('user_profiles')
         .select('*')
         .order('created_at', { ascending: false })
+
+      const { data: usersData, error: usersError } = await Promise.race([usersPromise, timeoutPromise]) as any
 
       if (usersError) {
         console.error('Error fetching users:', usersError)
@@ -555,6 +647,49 @@ export default function AdminDashboard() {
     }
   }
 
+  const handleImageUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0) return
+
+    setUploading(true)
+    try {
+      const uploadPromises = Array.from(files).map(async (file) => {
+        const fileExt = file.name.split('.').pop()
+        const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`
+        const filePath = fileName
+
+        const { error: uploadError } = await supabase.storage
+          .from('product-images')
+          .upload(filePath, file)
+
+        if (uploadError) throw uploadError
+
+        const { data } = supabase.storage
+          .from('product-images')
+          .getPublicUrl(filePath)
+
+        return data.publicUrl
+      })
+
+      const uploadedUrls = await Promise.all(uploadPromises)
+      setProductForm(prev => ({
+        ...prev,
+        images: [...prev.images, ...uploadedUrls]
+      }))
+    } catch (error) {
+      console.error('Error uploading images:', error)
+      alert('Failed to upload images')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const handleRemoveImage = (index: number) => {
+    setProductForm(prev => ({
+      ...prev,
+      images: prev.images.filter((_, i) => i !== index)
+    }))
+  }
+
   const handleAddProduct = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!productForm.name || !productForm.price) {
@@ -570,13 +705,14 @@ export default function AdminDashboard() {
           name: productForm.name,
           price: parseFloat(productForm.price),
           description: productForm.description,
-          is_available: productForm.is_available
+          is_available: productForm.is_available,
+          images: productForm.images
         }])
 
       if (error) throw error
 
       setShowAddProductModal(false)
-      setProductForm({ name: '', price: '', description: '', is_available: true })
+      setProductForm({ name: '', price: '', description: '', is_available: true, images: [] })
       fetchProducts()
     } catch (error) {
       console.error('Error adding product:', error)
@@ -601,7 +737,8 @@ export default function AdminDashboard() {
           name: productForm.name,
           price: parseFloat(productForm.price),
           description: productForm.description,
-          is_available: productForm.is_available
+          is_available: productForm.is_available,
+          images: productForm.images
         })
         .eq('id', editingProduct.id)
 
@@ -609,7 +746,7 @@ export default function AdminDashboard() {
 
       setShowEditProductModal(false)
       setEditingProduct(null)
-      setProductForm({ name: '', price: '', description: '', is_available: true })
+      setProductForm({ name: '', price: '', description: '', is_available: true, images: [] })
       fetchProducts()
     } catch (error) {
       console.error('Error updating product:', error)
@@ -1406,7 +1543,8 @@ export default function AdminDashboard() {
                                 name: product.name,
                                 price: product.price.toString(),
                                 description: product.description,
-                                is_available: product.is_available
+                                is_available: product.is_available,
+                                images: product.images || []
                               })
                               setShowEditProductModal(true)
                             }}
@@ -1916,13 +2054,68 @@ export default function AdminDashboard() {
                     <span className="ml-2 text-sm text-gray-700">Available for purchase</span>
                   </label>
                 </div>
+                
+                {/* Image Upload Section */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Product Images
+                  </label>
+                  <div className="space-y-3">
+                    {/* Image Upload Input */}
+                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-gray-400 transition-colors">
+                      <input
+                        type="file"
+                        multiple
+                        accept="image/*"
+                        onChange={(e) => handleImageUpload(e.target.files)}
+                        className="hidden"
+                        id="product-images-upload"
+                        disabled={uploading}
+                      />
+                      <label
+                        htmlFor="product-images-upload"
+                        className="cursor-pointer flex flex-col items-center"
+                      >
+                        <svg className="w-8 h-8 text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                        </svg>
+                        <span className="text-sm text-gray-600">
+                          {uploading ? 'Uploading...' : 'Click to upload images'}
+                        </span>
+                        <span className="text-xs text-gray-500">Multiple images supported</span>
+                      </label>
+                    </div>
+                    
+                    {/* Display Uploaded Images */}
+                    {productForm.images.length > 0 && (
+                      <div className="grid grid-cols-2 gap-2">
+                        {productForm.images.map((imageUrl, index) => (
+                          <div key={index} className="relative group">
+                            <img
+                              src={imageUrl}
+                              alt={`Product image ${index + 1}`}
+                              className="w-full h-24 object-cover rounded border"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveImage(index)}
+                              className="absolute top-1 right-1 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
               <div className="flex justify-end space-x-3 mt-6">
                 <button
                   type="button"
                   onClick={() => {
                     setShowAddProductModal(false)
-                    setProductForm({ name: '', price: '', description: '', is_available: true })
+                    setProductForm({ name: '', price: '', description: '', is_available: true, images: [] })
                   }}
                   className="px-4 py-2 text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
                 >
@@ -1999,6 +2192,61 @@ export default function AdminDashboard() {
                     <span className="ml-2 text-sm text-gray-700">Available for purchase</span>
                   </label>
                 </div>
+                
+                {/* Image Upload Section */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Product Images
+                  </label>
+                  <div className="space-y-3">
+                    {/* Image Upload Input */}
+                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-gray-400 transition-colors">
+                      <input
+                        type="file"
+                        multiple
+                        accept="image/*"
+                        onChange={(e) => handleImageUpload(e.target.files)}
+                        className="hidden"
+                        id="edit-product-images-upload"
+                        disabled={uploading}
+                      />
+                      <label
+                        htmlFor="edit-product-images-upload"
+                        className="cursor-pointer flex flex-col items-center"
+                      >
+                        <svg className="w-8 h-8 text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                        </svg>
+                        <span className="text-sm text-gray-600">
+                          {uploading ? 'Uploading...' : 'Click to upload images'}
+                        </span>
+                        <span className="text-xs text-gray-500">Multiple images supported</span>
+                      </label>
+                    </div>
+                    
+                    {/* Display Uploaded Images */}
+                    {productForm.images.length > 0 && (
+                      <div className="grid grid-cols-2 gap-2">
+                        {productForm.images.map((imageUrl, index) => (
+                          <div key={index} className="relative group">
+                            <img
+                              src={imageUrl}
+                              alt={`Product image ${index + 1}`}
+                              className="w-full h-24 object-cover rounded border"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveImage(index)}
+                              className="absolute top-1 right-1 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
               <div className="flex justify-end space-x-3 mt-6">
                 <button
@@ -2006,7 +2254,7 @@ export default function AdminDashboard() {
                   onClick={() => {
                     setShowEditProductModal(false)
                     setEditingProduct(null)
-                    setProductForm({ name: '', price: '', description: '', is_available: true })
+                    setProductForm({ name: '', price: '', description: '', is_available: true, images: [] })
                   }}
                   className="px-4 py-2 text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
                 >

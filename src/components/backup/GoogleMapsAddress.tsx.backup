@@ -1,0 +1,609 @@
+'use client'
+
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { MapPin, Map, AlertTriangle } from 'lucide-react'
+import Script from 'next/script'
+
+// Google Maps types
+declare global {
+  interface Window {
+    google: any
+    initGoogleMaps: () => void
+  }
+}
+
+interface GoogleMapsAddressProps {
+  onAddressChange: (address: string, lat: number, lng: number) => void
+  onValidationChange: (isValid: boolean) => void
+  initialAddress?: string
+  initialLat?: number
+  initialLng?: number
+  required?: boolean
+}
+
+const DEFAULT_LAT = 13.1939 // Barbados latitude
+const DEFAULT_LNG = -59.5432 // Barbados longitude
+
+export default function GoogleMapsAddress({
+  onAddressChange,
+  onValidationChange,
+  initialAddress = '',
+  initialLat = DEFAULT_LAT,
+  initialLng = DEFAULT_LNG,
+  required = false,
+}: GoogleMapsAddressProps) {
+  const [address, setAddress] = useState(initialAddress)
+  const [coords, setCoords] = useState({ lat: initialLat, lng: initialLng })
+  const [isValid, setIsValid] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [isGoogleMapsLoaded, setIsGoogleMapsLoaded] = useState(false)
+  const [isMapInitialized, setIsMapInitialized] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [mapsError, setMapsError] = useState(false)
+  const [retryCount, setRetryCount] = useState(0)
+  const [isRetrying, setIsRetrying] = useState(false)
+  const [showFallback, setShowFallback] = useState(false)
+  const [hasUserEdited, setHasUserEdited] = useState(false)
+
+  const inputRef = useRef<HTMLInputElement>(null)
+  const mapRef = useRef<HTMLDivElement>(null)
+  const mapInstanceRef = useRef<any>(null)
+  const markerRef = useRef<any>(null)
+  const autocompleteRef = useRef<any>(null)
+  const listenersRef = useRef<any[]>([])
+  const mountedRef = useRef(true)
+
+  // Validate location coordinates
+  const validateLocation = useCallback((address: string, lat: number, lng: number) => {
+    const isValidCoords = lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180
+    const isValidAddress = address.trim().length > 0
+    const newIsValid = isValidCoords && isValidAddress
+    setIsValid(newIsValid)
+    onValidationChange(newIsValid)
+    return newIsValid
+  }, [onValidationChange])
+
+  // Geocode address manually if autocomplete is not used
+  const geocodeAddress = useCallback(async (addressToGeocode: string) => {
+    if (!window.google?.maps?.Geocoder) {
+      console.warn('Geocoder not available, cannot geocode manually.')
+      return
+    }
+    
+    const geocoder = new window.google.maps.Geocoder()
+    try {
+      const { results, status } = await geocoder.geocode({ 
+        address: addressToGeocode, 
+        componentRestrictions: { country: 'BB' } 
+      })
+      if (status === 'OK' && results[0]) {
+        const newLat = results[0].geometry.location.lat()
+        const newLng = results[0].geometry.location.lng()
+        setCoords({ lat: newLat, lng: newLng })
+        onAddressChange(addressToGeocode, newLat, newLng)
+        validateLocation(addressToGeocode, newLat, newLng)
+        setError('')
+        
+        // Update map center and marker if map is available
+        if (mapInstanceRef.current && markerRef.current) {
+          mapInstanceRef.current.setCenter({ lat: newLat, lng: newLng })
+          markerRef.current.setPosition({ lat: newLat, lng: newLng })
+        }
+      } else {
+        console.warn('Geocoding failed:', status)
+        // Allow manual entry even if geocoding fails
+        validateLocation(addressToGeocode, DEFAULT_LAT, DEFAULT_LNG)
+      }
+    } catch (err) {
+      console.error('Error during geocoding:', err)
+      // Allow manual entry even if geocoding throws an error
+      validateLocation(addressToGeocode, DEFAULT_LAT, DEFAULT_LNG)
+    }
+  }, [onAddressChange, validateLocation])
+
+  const handleMapsError = useCallback(() => {
+    console.error('Google Maps failed to load or encountered an error')
+    setMapsError(true)
+    setShowFallback(true)
+    setError('Google Maps failed to load. You can still enter your address manually.')
+    setLoading(false)
+    // Immediately notify parent that validation should be lenient
+    onValidationChange(true)
+  }, [onValidationChange])
+
+  // Initialize map when Google Maps loads
+  const initializeMap = useCallback(() => {
+    if (!window.google?.maps || !mapRef.current || isMapInitialized) return
+
+    try {
+      const map = new window.google.maps.Map(mapRef.current, {
+        center: { lat: coords.lat, lng: coords.lng },
+        zoom: 15,
+        mapTypeControl: false,
+        streetViewControl: false,
+        fullscreenControl: false
+      })
+
+      mapInstanceRef.current = map
+
+      const marker = new window.google.maps.Marker({
+        position: { lat: coords.lat, lng: coords.lng },
+        map: map,
+        draggable: true,
+        title: 'Delivery Location'
+      })
+
+      markerRef.current = marker
+
+      // Listen for marker drag
+      const dragListener = marker.addListener('dragend', () => {
+        const newPos = marker.getPosition()
+        if (newPos) {
+          const newLat = newPos.lat()
+          const newLng = newPos.lng()
+          setCoords({ lat: newLat, lng: newLng })
+          onAddressChange(address, newLat, newLng)
+        }
+      })
+      listenersRef.current.push(dragListener)
+
+      setIsMapInitialized(true)
+      setShowFallback(false)
+      setLoading(false)
+    } catch (err) {
+      console.error('Error initializing Google Maps:', err)
+      handleMapsError()
+    }
+  }, [coords.lat, coords.lng, isMapInitialized, onAddressChange, address, handleMapsError])
+
+  // Set up autocomplete
+  const setupAutocomplete = useCallback(() => {
+    if (!window.google?.maps?.places?.Autocomplete || !inputRef.current || autocompleteRef.current) {
+      console.log('Autocomplete setup skipped:', {
+        hasGoogle: !!window.google,
+        hasMaps: !!window.google?.maps,
+        hasPlaces: !!window.google?.maps?.places,
+        hasAutocomplete: !!window.google?.maps?.places?.Autocomplete,
+        hasInput: !!inputRef.current,
+        hasExistingAutocomplete: !!autocompleteRef.current
+      })
+      return false
+    }
+
+    try {
+      console.log('Setting up Google Places Autocomplete')
+      autocompleteRef.current = new window.google.maps.places.Autocomplete(inputRef.current, {
+        types: ['address'],
+        componentRestrictions: { country: 'BB' },
+        fields: ['formatted_address', 'geometry']
+      })
+
+      // Listen for place selection
+      const placeListener = autocompleteRef.current.addListener('place_changed', () => {
+        console.log('Place changed event triggered')
+        const place = autocompleteRef.current?.getPlace()
+        console.log('Selected place:', place)
+        
+        if (place?.geometry?.location) {
+          const newLat = place.geometry.location.lat()
+          const newLng = place.geometry.location.lng()
+          const newAddress = place.formatted_address || ''
+          
+          console.log('Updating with selected place:', { newAddress, newLat, newLng })
+          
+          // Update map center and marker if map is available
+          if (mapInstanceRef.current && markerRef.current) {
+            mapInstanceRef.current.setCenter({ lat: newLat, lng: newLng })
+            mapInstanceRef.current.setZoom(17)
+          }
+          
+          if (markerRef.current) {
+            markerRef.current.setPosition({ lat: newLat, lng: newLng })
+          }
+          
+          // Update state and notify parent
+          setCoords({ lat: newLat, lng: newLng })
+          setAddress(newAddress)
+          setHasUserEdited(true)
+          
+          // Force update the input field value
+          if (inputRef.current) {
+            inputRef.current.value = newAddress
+            // Trigger input event to ensure form recognizes the change
+            const inputEvent = new Event('input', { bubbles: true })
+            inputRef.current.dispatchEvent(inputEvent)
+          }
+          
+          // Notify parent component
+          onAddressChange(newAddress, newLat, newLng)
+          validateLocation(newAddress, newLat, newLng)
+          setError('')
+          
+          // Clear the autocomplete to prevent further suggestions
+          if (autocompleteRef.current) {
+            autocompleteRef.current.set('place', null)
+            // Remove the autocomplete instance to stop suggestions
+            autocompleteRef.current = null
+          }
+          
+          console.log('Address updated successfully:', newAddress)
+        } else {
+          console.warn('Selected place has no geometry or location')
+        }
+      })
+      listenersRef.current.push(placeListener)
+      console.log('Autocomplete setup complete')
+      return true
+    } catch (err) {
+      console.error('Error setting up autocomplete:', err)
+      return false
+    }
+  }, [onAddressChange, validateLocation])
+
+  // Handle input changes
+  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const newAddress = e.target.value
+    setAddress(newAddress)
+    setHasUserEdited(true)
+    
+    if (newAddress.trim() === '') {
+      setIsValid(false)
+      onValidationChange(false)
+      setError('Please enter your address')
+    } else {
+      setError('')
+      // Try to geocode the address after a short delay
+      setTimeout(() => {
+        geocodeAddress(newAddress)
+      }, 1000)
+    }
+  }, [onValidationChange, geocodeAddress])
+
+  // Handle input focus
+  const handleInputFocus = useCallback(() => {
+    console.log('Input focused')
+    if (inputRef.current && address && address.trim() !== '') {
+      inputRef.current.select()
+    }
+    
+    // Re-enable autocomplete if user wants to change the address
+    if (!autocompleteRef.current && window.google?.maps?.places?.Autocomplete) {
+      console.log('Input focused - re-enabling autocomplete for address change')
+      setupAutocomplete()
+    }
+  }, [address, setupAutocomplete])
+
+  const handleInputClick = useCallback(() => {
+    console.log('Input clicked')
+    if (inputRef.current && address && address.trim() !== '') {
+      inputRef.current.select()
+    }
+    
+    // Re-enable autocomplete if user wants to change the address
+    if (!autocompleteRef.current && window.google?.maps?.places?.Autocomplete) {
+      console.log('Input clicked - re-enabling autocomplete for address change')
+      setupAutocomplete()
+    }
+  }, [address, setupAutocomplete])
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    setHasUserEdited(true)
+    
+    // Re-enable autocomplete when user starts typing
+    if (!autocompleteRef.current && window.google?.maps?.places?.Autocomplete) {
+      console.log('User typing - re-enabling autocomplete')
+      setupAutocomplete()
+    }
+    
+    // If user presses any printable character and all text is selected, clear it first
+    if (e.key.length === 1 && inputRef.current && inputRef.current.selectionStart === 0 && inputRef.current.selectionEnd === address.length) {
+      setAddress('')
+      setError('')
+    }
+    
+    e.stopPropagation()
+  }, [address, setupAutocomplete])
+
+  // Effect to set initial address if provided and user hasn't edited
+  useEffect(() => {
+    if (initialAddress && initialAddress !== address && !hasUserEdited) {
+      setAddress(initialAddress)
+      setCoords({ lat: initialLat, lng: initialLng })
+      validateLocation(initialAddress, initialLat, initialLng)
+      
+      // Update map and marker if they're already initialized
+      if (mapInstanceRef.current && markerRef.current) {
+        const newPos = { lat: initialLat, lng: initialLng }
+        mapInstanceRef.current.setCenter(newPos)
+        markerRef.current.setPosition(newPos)
+      }
+    }
+  }, [initialAddress, initialLat, initialLng, address, validateLocation, hasUserEdited])
+
+  // Initialize map when Google Maps is loaded
+  useEffect(() => {
+    if (isGoogleMapsLoaded && !isMapInitialized) {
+      initializeMap()
+    }
+  }, [isGoogleMapsLoaded, isMapInitialized, initializeMap])
+
+  // Set up autocomplete when Google Maps is loaded
+  useEffect(() => {
+    if (isGoogleMapsLoaded) {
+      // Try to set up autocomplete immediately
+      if (window.google?.maps?.places?.Autocomplete && inputRef.current && !autocompleteRef.current) {
+        console.log('Setting up autocomplete immediately')
+        setupAutocomplete()
+      } else {
+        // If not ready, try again after a delay
+        const timer = setTimeout(() => {
+          if (window.google?.maps?.places?.Autocomplete && inputRef.current && !autocompleteRef.current) {
+            console.log('Setting up autocomplete after delay')
+            setupAutocomplete()
+          }
+        }, 1000)
+        
+        return () => clearTimeout(timer)
+      }
+    }
+  }, [isGoogleMapsLoaded, setupAutocomplete])
+
+  // Global callback setup
+  useEffect(() => {
+    mountedRef.current = true
+    
+    // Prevent multiple instances from conflicting
+    if (typeof window.initGoogleMaps === 'function') {
+      console.log('Google Maps already being loaded by another instance')
+      return
+    }
+    
+    window.initGoogleMaps = () => {
+      console.log('Google Maps callback triggered')
+      if (mountedRef.current) {
+        setIsGoogleMapsLoaded(true)
+      }
+    }
+    
+    // Check if Google Maps is already available
+    if (window.google?.maps && window.google.maps.places?.Autocomplete) {
+      console.log('Google Maps already available')
+      setIsGoogleMapsLoaded(true)
+      return
+    }
+    
+    // Check if Google Maps loads manually with shorter intervals
+    const checkGoogleMapsLoad = () => {
+      if (window.google?.maps && window.google?.maps?.places?.Autocomplete) {
+        console.log('Google Maps and Places detected, setting loaded state')
+        if (mountedRef.current) {
+          setIsGoogleMapsLoaded(true)
+        }
+        return true
+      }
+      return false
+    }
+    
+    // Check immediately
+    if (checkGoogleMapsLoad()) {
+      // Already loaded
+    } else {
+      // Check more frequently but for shorter duration
+      const checkInterval = setInterval(() => {
+        if (checkGoogleMapsLoad()) {
+          clearInterval(checkInterval)
+        }
+      }, 500) // Check every 500ms
+      
+      // Stop checking after 5 seconds (reduced from 10)
+      setTimeout(() => {
+        clearInterval(checkInterval)
+        if (!isGoogleMapsLoaded && mountedRef.current) {
+          console.log('Google Maps failed to load after 5 seconds')
+          handleMapsError()
+        }
+      }, 5000)
+    }
+
+    return () => {
+      mountedRef.current = false
+      listenersRef.current.forEach(listener => listener.remove())
+      // Clean up global callback
+      if (typeof window.initGoogleMaps === 'function') {
+        delete (window as any).initGoogleMaps
+      }
+    }
+  }, [isGoogleMapsLoaded, handleMapsError])
+
+  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+  
+  if (!apiKey) {
+    console.warn('Google Maps API key not found - using fallback mode')
+    return (
+      <div className="space-y-4">
+        <div>
+          <label htmlFor="address" className="block text-sm font-medium text-gray-700 mb-2">
+            Delivery Address {required && <span className="text-red-500">*</span>}
+          </label>
+          <div className="relative">
+            <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
+            <input
+              ref={inputRef}
+              id="address"
+              type="text"
+              value={address}
+              onChange={handleInputChange}
+              onKeyDown={handleKeyDown}
+              onFocus={handleInputFocus}
+              onClick={handleInputClick}
+              className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+              placeholder="Enter your delivery address"
+              autoComplete="address"
+            />
+          </div>
+          <p className="mt-2 text-sm text-gray-500">
+            Start typing to enter your address manually.
+          </p>
+        </div>
+        
+        {/* Map fallback */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Map Location</label>
+          <div className="w-full h-64 rounded-lg border border-gray-300 bg-gray-50 flex items-center justify-center">
+            <div className="text-center p-6">
+              <Map className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">Map Unavailable</h3>
+              <p className="text-gray-600 mb-4">
+                Google Maps is not configured. You can still enter your address manually above.
+              </p>
+            </div>
+          </div>
+        </div>
+        
+        {address && (
+          <div className="mt-2 text-sm">
+            {isValid ? (
+              <span className="text-green-600 flex items-center">
+                ✓ Valid delivery address
+              </span>
+            ) : (
+              <span className="text-amber-600 flex items-center">
+                ⚠ Address entered manually - will use default coordinates
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <>
+      {/* Load Google Maps script only if not already loaded */}
+      {!window.google?.maps && (
+        <Script
+          id="google-maps-script"
+          src={`https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&callback=initGoogleMaps`}
+          strategy="afterInteractive"
+          onLoad={() => {
+            console.log('Google Maps script loaded')
+            if (mountedRef.current) {
+              setIsGoogleMapsLoaded(true)
+            }
+          }}
+          onError={() => {
+            console.error('Failed to load Google Maps script')
+            if (mountedRef.current) {
+              handleMapsError()
+            }
+          }}
+        />
+      )}
+
+      <div className="space-y-4">
+        {/* Address input - always show this first */}
+        <div>
+          <label htmlFor="address" className="block text-sm font-medium text-gray-700 mb-2">
+            Delivery Address {required && <span className="text-red-500">*</span>}
+          </label>
+          <div className="relative">
+            <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
+            <input
+              ref={inputRef}
+              id="address"
+              name="address"
+              type="text"
+              required={required}
+              value={address}
+              onChange={handleInputChange}
+              onKeyDown={handleKeyDown}
+              onFocus={handleInputFocus}
+              onClick={handleInputClick}
+              className="appearance-none relative block w-full px-10 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
+              placeholder="Type your address or search for a location"
+              autoComplete="address"
+            />
+          </div>
+          <div className="mt-1 text-xs text-gray-500">
+            {showFallback 
+              ? 'Enter your address manually - Google Maps is not available'
+              : 'Start typing to see address suggestions. Select an address to automatically move the map.'
+            }
+          </div>
+          {error && (
+            <p className="mt-2 text-sm text-red-600 flex items-center">
+              <AlertTriangle className="w-4 h-4 mr-1" /> {error}
+            </p>
+          )}
+        </div>
+
+        {/* Loading overlay only for map area */}
+        {loading && !showFallback && (
+          <div className="relative">
+            <div className="absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center z-10 rounded-lg">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-4 border-green-500 border-t-transparent mx-auto mb-3"></div>
+                <p className="text-gray-700 font-medium">
+                  {mapsError ? 'Retrying Google Maps...' : 'Loading Google Maps...'}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Map container */}
+        <div className="relative">
+          <label className="block text-sm font-medium text-gray-700 mb-2">Map Location</label>
+          <div
+            ref={mapRef}
+            className="w-full h-64 bg-gray-100 rounded-lg"
+            style={{ display: showFallback ? 'none' : 'block' }}
+          >
+            {/* Map will render here */}
+          </div>
+          {showFallback && (
+            <div className="w-full h-64 rounded-lg border border-gray-300 bg-gray-50 flex items-center justify-center">
+              <div className="text-center p-6">
+                <Map className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">Map Unavailable</h3>
+                <p className="text-gray-600 mb-4">
+                  Google Maps is not configured or failed to load. You can still enter your address manually above.
+                </p>
+                <button
+                  onClick={() => {
+                    setShowFallback(false)
+                    setMapsError(false)
+                    setIsRetrying(true)
+                    setRetryCount(prev => prev + 1)
+                    // Re-add script by changing key or src to force reload
+                    const script = document.getElementById('google-maps-script')
+                    if (script) {
+                      script.remove()
+                    }
+                    // This will cause the Script component to re-render and re-add the script
+                    setIsGoogleMapsLoaded(false) 
+                    setLoading(true)
+                  }}
+                  className="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors"
+                >
+                  Try Again
+                </button>
+              </div>
+            </div>
+          )}
+          <div className="mt-2 text-xs text-gray-500">
+            {showFallback
+              ? '⚠️ Map unavailable - address can still be entered manually'
+              : isMapInitialized
+              ? '✅ Interactive map loaded - type an address above or drag the marker to adjust location'
+              : 'Loading map and address autocomplete...'}
+          </div>
+        </div>
+
+        {/* Hidden fields reflect live coordinates */}
+        <input type="hidden" name="latitude" value={coords.lat} readOnly />
+        <input type="hidden" name="longitude" value={coords.lng} readOnly />
+      </div>
+    </>
+  )
+}

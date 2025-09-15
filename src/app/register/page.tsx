@@ -6,9 +6,10 @@ import Link from 'next/link'
 import { Eye, EyeOff, User, Mail, Lock, Home } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import dynamic from 'next/dynamic'
+import PhoneNumberInput from '@/components/PhoneNumberInput'
 
-const GoogleMapsAddress = dynamic(
-  () => import('@/components/GoogleMapsAddress'),
+const SimpleAddressInput = dynamic(
+  () => import('@/components/SimpleAddressInput'),
   { ssr: false }
 )
 
@@ -205,23 +206,16 @@ export default function RegisterPage() {
             </div>
 
             {/* Phone */}
-            <div>
-              <label htmlFor="phone" className="block text-sm font-medium text-gray-700 mb-2">
-                Phone Number
-              </label>
-              <div className="relative">
-                <input
-                  id="phone"
-                  name="phone"
-                  type="tel"
-                  required
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  className="block w-full px-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                  placeholder="Enter your phone number"
-                />
-              </div>
-            </div>
+            <PhoneNumberInput
+              value={phone}
+              onChange={setPhone}
+              required={true}
+              placeholder="Enter WhatsApp number"
+              id="phone"
+              name="phone"
+              label="Phone Number"
+              description="We'll use this to send you updates about your orders via WhatsApp"
+            />
 
             {/* Password */}
             <div>
@@ -279,8 +273,8 @@ export default function RegisterPage() {
               </div>
             </div>
 
-            {/* Google Maps Address Component */}
-            <GoogleMapsAddress
+            {/* Simple Address Input Component */}
+            <SimpleAddressInput
               onAddressChange={handleAddressChange}
               onValidationChange={handleAddressValidation}
               initialAddress={address}

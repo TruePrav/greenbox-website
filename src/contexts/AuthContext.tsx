@@ -65,22 +65,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     )
 
     return () => subscription.unsubscribe()
-  }, [])
+  }, []) // Remove fetchProfile from dependencies to prevent infinite loops
 
   const fetchProfile = async (userId: string, retryCount = 0) => {
     // Prevent multiple simultaneous profile fetches
-          if (isFetchingProfile) {
-        return
-      }
+    if (isFetchingProfile) {
+      return
+    }
     
     setIsFetchingProfile(true)
     
     try {
-
-      
-      // Add timeout to prevent hanging - increased from 15s to 30s
+      // Reduced timeout to 5 seconds to prevent stuck pages
       const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Profile fetch timeout')), 30000)
+        setTimeout(() => reject(new Error('Profile fetch timeout')), 5000)
       )
 
       const profilePromise = supabase
@@ -92,7 +90,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { data, error } = await Promise.race([profilePromise, timeoutPromise]) as any
 
       if (!error && data) {
-
         setProfile(data)
       } else {
         // Only create profile if it's a "not found" error, not other errors
@@ -115,39 +112,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             .single()
 
           if (newProfile) {
-
             setProfile(newProfile)
           }
         } else {
           console.error('Error fetching profile:', error)
           
-          // Retry logic - try again up to 2 times
-          if (retryCount < 2) {
-
+          // Reduced retry attempts to prevent infinite loops
+          if (retryCount < 1) {
             setTimeout(() => {
               fetchProfile(userId, retryCount + 1)
-            }, 1000 * (retryCount + 1)) // Exponential backoff
+            }, 2000) // Fixed 2 second delay
             return
           }
           
           // If all retries failed, don't block the app
-
+          console.warn('Profile fetch failed after retries, continuing without profile')
         }
       }
     } catch (error) {
       console.error('Unexpected error fetching profile:', error)
       
-      // Retry logic for timeout errors
-      if (error instanceof Error && error.message.includes('timeout') && retryCount < 2) {
-
+      // Reduced retry logic for timeout errors
+      if (error instanceof Error && error.message.includes('timeout') && retryCount < 1) {
         setTimeout(() => {
           fetchProfile(userId, retryCount + 1)
-        }, 1000 * (retryCount + 1))
+        }, 2000)
         return
       }
       
       // Don't block the app if profile fetch fails
-
+      console.warn('Profile fetch failed, continuing without profile')
     } finally {
       setIsFetchingProfile(false)
     }

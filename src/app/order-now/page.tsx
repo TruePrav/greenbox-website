@@ -5,6 +5,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { supabase, MenuItem, WeeklyMenu, Product } from '@/lib/supabase'
 import { Plus, Minus, ShoppingCart, X, Trash2, AlertCircle, Package } from 'lucide-react'
 import Link from 'next/link'
+import ProductImageCarousel from '@/components/ProductImageCarousel'
 
 interface CartItem {
   id: string
@@ -98,40 +99,59 @@ export default function OrderNowPage() {
       setLoading(true)
       setError(null)
       
-      // Fetch weekly menu image
-      const { data: weeklyMenuData, error: weeklyMenuError } = await supabase
-        .from('weekly_menus')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single()
+      // Use Promise.all to fetch data in parallel for better performance
+      const [weeklyMenuResult, productsResult] = await Promise.allSettled([
+        supabase
+          .from('weekly_menus')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single(),
+        supabase
+          .from('products')
+          .select('*')
+          .eq('is_available', true)
+          .order('name')
+      ])
 
-      if (weeklyMenuError) {
-        console.error('Error fetching weekly menu:', weeklyMenuError)
+      // Handle weekly menu result
+      if (weeklyMenuResult.status === 'fulfilled') {
+        const { data: weeklyMenuData, error: weeklyMenuError } = weeklyMenuResult.value
+        if (weeklyMenuError) {
+          console.error('Error fetching weekly menu:', weeklyMenuError)
+          if (!isRetry) {
+            setError('Failed to load weekly menu. Please try again.')
+          }
+        } else if (weeklyMenuData) {
+          setWeeklyMenu(weeklyMenuData)
+        }
+      } else {
+        console.error('Weekly menu fetch failed:', weeklyMenuResult.reason)
         if (!isRetry) {
           setError('Failed to load weekly menu. Please try again.')
         }
-      } else if (weeklyMenuData) {
-        setWeeklyMenu(weeklyMenuData)
       }
 
-      // Fetch products
-      const { data: productsData, error: productsError } = await supabase
-        .from('products')
-        .select('*')
-        .eq('is_available', true)
-        .order('name')
-
-      if (productsError) {
-        console.error('Error fetching products:', productsError)
+      // Handle products result
+      if (productsResult.status === 'fulfilled') {
+        const { data: productsData, error: productsError } = productsResult.value
+        if (productsError) {
+          console.error('Error fetching products:', productsError)
+          setProducts([])
+          if (!isRetry) {
+            setError('Failed to load products. Please try again.')
+          }
+        } else if (productsData) {
+          setProducts(productsData)
+        } else {
+          setProducts([])
+        }
+      } else {
+        console.error('Products fetch failed:', productsResult.reason)
         setProducts([])
         if (!isRetry) {
           setError('Failed to load products. Please try again.')
         }
-      } else if (productsData) {
-        setProducts(productsData)
-      } else {
-        setProducts([])
       }
     } catch (error) {
       console.error('Error fetching data:', error)
@@ -149,12 +169,19 @@ export default function OrderNowPage() {
       setLoading(true)
       setError(null)
       
-      const { data: menuItemsData, error } = await supabase
+      // Add timeout to prevent hanging
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Menu fetch timeout')), 5000)
+      )
+
+      const menuPromise = supabase
         .from('menu_items')
         .select('*')
         .eq('day', day)
         .eq('is_available', true)
         .order('name')
+
+      const { data: menuItemsData, error } = await Promise.race([menuPromise, timeoutPromise]) as any
 
       if (error) {
         console.error('Supabase error:', error)
@@ -780,24 +807,33 @@ export default function OrderNowPage() {
             <h2 className="text-2xl font-semibold text-gray-900 mb-6">Available Products</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {products.map((product) => (
-                <div key={product.id} className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
-                  <div className="flex justify-between items-start mb-3">
-                    <div>
-                      <h3 className="text-lg font-semibold text-gray-900">{product.name}</h3>
-                      <p className="text-green-600 font-bold mt-2">${product.price.toFixed(2)}</p>
+                <div key={product.id} className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+                  {/* Product Image */}
+                  <ProductImageCarousel
+                    images={product.images || []}
+                    productName={product.name}
+                    className="w-full h-48"
+                  />
+                  
+                  <div className="p-6">
+                    <div className="flex justify-between items-start mb-3">
+                      <div>
+                        <h3 className="text-lg font-semibold text-gray-900">{product.name}</h3>
+                        <p className="text-green-600 font-bold mt-2">${product.price.toFixed(2)}</p>
+                      </div>
                     </div>
-                  </div>
-                  
-                  <p className="text-gray-600 text-sm mb-4 line-clamp-3">{product.description}</p>
-                  
-                  <div className="flex items-center space-x-3">
-                    <button
-                      type="button"
-                      onClick={() => addProductToCart(product, 1)}
-                      className="flex-1 py-2 px-4 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
-                    >
-                      Add to Cart
-                    </button>
+                    
+                    <p className="text-gray-600 text-sm mb-4 line-clamp-3">{product.description}</p>
+                    
+                    <div className="flex items-center space-x-3">
+                      <button
+                        type="button"
+                        onClick={() => addProductToCart(product, 1)}
+                        className="flex-1 py-2 px-4 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
+                      >
+                        Add to Cart
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}

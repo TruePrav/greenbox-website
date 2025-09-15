@@ -5,9 +5,10 @@ import { useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import { User, Save, AlertCircle, LogOut } from 'lucide-react'
 import dynamic from 'next/dynamic'
+import PhoneNumberInput from '@/components/PhoneNumberInput'
 
-const GoogleMapsAddress = dynamic(
-  () => import('@/components/GoogleMapsAddress'),
+const SimpleAddressInput = dynamic(
+  () => import('@/components/SimpleAddressInput'),
   { ssr: false }
 )
 
@@ -80,12 +81,17 @@ export default function AccountPage() {
   }
 
   const handleAddressChange = (addr: string, lat: number, lng: number) => {
-    setFormData(prev => ({
-      ...prev,
-      address: addr,
-      latitude: Number(lat),
-      longitude: Number(lng)
-    }))
+    console.log('Account page - handleAddressChange called:', { addr, lat, lng })
+    setFormData(prev => {
+      const newData = {
+        ...prev,
+        address: addr,
+        latitude: Number(lat),
+        longitude: Number(lng)
+      }
+      console.log('Account page - formData updated:', newData)
+      return newData
+    })
   }
 
   const handleAddressValidation = (isValid: boolean) => {
@@ -132,6 +138,8 @@ export default function AccountPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    
+    console.log('Account page - handleSubmit called with formData:', formData)
     
     // Validate required fields
     if (!formData.full_name.trim()) {
@@ -262,21 +270,20 @@ export default function AccountPage() {
             </div>
 
             <div>
-              <label htmlFor="phone" className="block text-sm font-medium text-gray-700 mb-2">
-                Phone Number <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="tel"
-                id="phone"
+              <PhoneNumberInput
                 value={formData.phone}
-                onChange={(e) => handleInputChange('phone', e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 border-transparent"
-                placeholder="Enter your phone number"
+                onChange={(value) => handleInputChange('phone', value)}
+                required={true}
+                placeholder="Enter WhatsApp number"
+                id="phone"
+                name="phone"
+                label="Phone Number"
+                description="We'll use this to send you updates about your orders via WhatsApp"
               />
             </div>
 
             <div>
-              <GoogleMapsAddress
+              <SimpleAddressInput
                 onAddressChange={handleAddressChange}
                 onValidationChange={handleAddressValidation}
                 initialAddress={formData.address}
@@ -284,19 +291,6 @@ export default function AccountPage() {
                 initialLng={formData.longitude}
                 required={true}
               />
-              {formData.address && (
-                <div className="mt-2 text-sm">
-                  {isAddressValid ? (
-                    <span className="text-green-600 flex items-center">
-                      ✓ Valid delivery address
-                    </span>
-                  ) : (
-                    <span className="text-amber-600 flex items-center">
-                      ⚠ Address entered manually - will use default coordinates
-                    </span>
-                  )}
-                </div>
-              )}
             </div>
 
             <div>
@@ -304,7 +298,7 @@ export default function AccountPage() {
                 Delivery Fee
               </label>
               <div className="px-3 py-2 bg-gray-50 border border-gray-300 rounded-md text-gray-700">
-                {formData.delivery_fee !== null ? `$${formData.delivery_fee.toFixed(2)}` : 'Not set by admin'}
+                {formData.delivery_fee !== null ? `$${formData.delivery_fee.toFixed(2)}` : 'Will be updated by admin team'}
               </div>
               <p className="mt-1 text-xs text-gray-500">
                 This delivery fee is set by the site administrator and cannot be changed by customers.
