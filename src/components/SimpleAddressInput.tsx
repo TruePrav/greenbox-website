@@ -248,12 +248,13 @@ export default function SimpleAddressInput({
 
   // Set up autocomplete (now just for state tracking)
   const setupAutocomplete = useCallback(() => {
-    if (!window.google?.maps?.places) {
+    if (!window.google?.maps?.places?.AutocompleteService) {
+      console.log('AutocompleteService not available for setup')
       return false
     }
     
     setIsAutocompleteActive(true)
-    console.log('Manual autocomplete setup complete')
+    console.log('Manual autocomplete setup complete - AutocompleteService available')
     return true
   }, [])
 
@@ -274,6 +275,11 @@ export default function SimpleAddressInput({
       setError('')
       // Get suggestions for the input
       if (isAutocompleteActive) {
+        getSuggestions(newAddress)
+      } else if (window.google?.maps?.places?.AutocompleteService) {
+        // If autocomplete is not active but Google Maps is available, enable it
+        console.log('Enabling autocomplete on input change')
+        setIsAutocompleteActive(true)
         getSuggestions(newAddress)
       }
       
@@ -413,12 +419,12 @@ export default function SimpleAddressInput({
   useEffect(() => {
     if (isGoogleMapsLoaded) {
       // Try to set up autocomplete immediately
-      if (window.google?.maps?.places?.Autocomplete && inputRef.current && !autocompleteRef.current) {
+      if (window.google?.maps?.places?.AutocompleteService && inputRef.current) {
         setupAutocomplete()
       } else {
         // If not ready, try again after a delay
         const timer = setTimeout(() => {
-          if (window.google?.maps?.places?.Autocomplete && inputRef.current && !autocompleteRef.current) {
+          if (window.google?.maps?.places?.AutocompleteService && inputRef.current) {
             setupAutocomplete()
           }
         }, 1000)
