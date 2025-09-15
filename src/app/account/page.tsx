@@ -6,6 +6,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { User, Save, AlertCircle, LogOut } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import PhoneNumberInput from '@/components/PhoneNumberInput'
+import GoogleMapsDebug from '@/components/GoogleMapsDebug'
 
 const SimpleAddressInput = dynamic(
   () => import('@/components/SimpleAddressInput'),
@@ -219,6 +220,7 @@ export default function AccountPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
+      <GoogleMapsDebug />
       <div className="max-w-2xl mx-auto px-4">
         <div className="bg-white rounded-lg shadow-md p-6">
           <div className="flex items-center justify-between mb-6">
