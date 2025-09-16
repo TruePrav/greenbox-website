@@ -144,8 +144,21 @@ export default function SimpleAddressInput({
 
         console.log('Making autocomplete request:', request)
 
+        // Add a timeout to detect if the callback never fires
+        const timeoutId = setTimeout(() => {
+          console.log('Autocomplete request timed out after 5 seconds')
+          setSuggestions([])
+          setShowSuggestions(false)
+        }, 5000)
+
         service.getPlacePredictions(request, (predictions: any, status: any) => {
-          console.log('Suggestions request result:', { status, predictionsCount: predictions?.length })
+          clearTimeout(timeoutId) // Clear timeout if callback fires
+          console.log('Suggestions request result:', { 
+            status, 
+            statusString: window.google.maps.places.PlacesServiceStatus[status],
+            predictionsCount: predictions?.length,
+            predictions: predictions 
+          })
           
           if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions) {
             const suggestionList = predictions.map((prediction: any) => prediction.description)
@@ -161,8 +174,21 @@ export default function SimpleAddressInput({
               types: ['address']
             }
             
+            // Add timeout for second request too
+            const timeoutId2 = setTimeout(() => {
+              console.log('Second autocomplete request timed out after 5 seconds')
+              setSuggestions([])
+              setShowSuggestions(false)
+            }, 5000)
+
             service.getPlacePredictions(request2, (predictions2: any, status2: any) => {
-              console.log('Suggestions request result (no country):', { status2, predictionsCount: predictions2?.length })
+              clearTimeout(timeoutId2) // Clear timeout if callback fires
+              console.log('Suggestions request result (no country):', { 
+                status2, 
+                status2String: window.google.maps.places.PlacesServiceStatus[status2],
+                predictionsCount: predictions2?.length,
+                predictions2: predictions2 
+              })
               
               if (status2 === window.google.maps.places.PlacesServiceStatus.OK && predictions2) {
                 const suggestionList = predictions2.map((prediction: any) => prediction.description)
@@ -171,13 +197,13 @@ export default function SimpleAddressInput({
                 setShowSuggestions(true)
                 setSelectedSuggestionIndex(-1)
               } else {
-                console.log('No suggestions found')
+                console.log('No suggestions found - status:', status2, 'predictions:', predictions2)
                 setSuggestions([])
                 setShowSuggestions(false)
               }
             })
           } else {
-            console.log('Autocomplete error:', status)
+            console.log('Autocomplete error - status:', status, 'statusString:', window.google.maps.places.PlacesServiceStatus[status])
             setSuggestions([])
             setShowSuggestions(false)
           }
